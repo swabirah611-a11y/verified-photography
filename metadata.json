@@ -1,0 +1,6 @@
+{
+  "name": "Verified Photography",
+  "description": "Premium digital photography portfolio for Verified Photography, serving Uromi, Ekpoma, and Auchi, Nigeria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
