@@ -16,6 +16,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import { CmsConfig } from '../../lib/supabase';
+import MediaUploader from './MediaUploader';
 
 interface ItemsManagersProps {
   config: CmsConfig;
@@ -496,7 +497,7 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
           {/* TEAM FORM */}
           {activeItemTab === 'team' && (
             <form onSubmit={handleSaveTeam} className="space-y-4">
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Team Member Name</label>
                   <input type="text" value={teamName} onChange={e => setTeamName(e.target.value)} required className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
@@ -505,10 +506,15 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
                   <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Role Designation</label>
                   <input type="text" value={teamRole} onChange={e => setTeamRole(e.target.value)} required className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Photo URL</label>
-                  <input type="text" value={teamPhoto} onChange={e => setTeamPhoto(e.target.value)} placeholder="https://images.unsplash.com..." className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
-                </div>
+              </div>
+              <div>
+                <MediaUploader
+                  value={teamPhoto}
+                  onChange={setTeamPhoto}
+                  folder="team"
+                  label="Team Member Portrait"
+                  aspectRatio="aspect-[1/1]"
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Short Biography Description</label>
@@ -535,11 +541,7 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
                   <input type="text" value={blogCategory} onChange={e => setBlogCategory(e.target.value)} className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
                 </div>
               </div>
-              <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Featured Image URL</label>
-                  <input type="text" value={blogImage} onChange={e => setBlogImage(e.target.value)} placeholder="https://images.unsplash.com..." className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
-                </div>
+              <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Tags (comma-separated)</label>
                   <input type="text" value={blogTags} onChange={e => setBlogTags(e.target.value)} placeholder="Retouching, Traditional, Benin" className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
@@ -548,6 +550,16 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
                   <label className="block text-[10px] font-mono text-[#A7C4B8] mb-1">Publish Date</label>
                   <input type="date" value={blogDate} onChange={e => setBlogDate(e.target.value)} className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
                 </div>
+              </div>
+
+              <div>
+                <MediaUploader
+                  value={blogImage}
+                  onChange={setBlogImage}
+                  folder="blog"
+                  label="Featured Article Cover"
+                  aspectRatio="aspect-[16/9]"
+                />
               </div>
 
               <div>

@@ -97,6 +97,7 @@ INSERT INTO storage.buckets (id, name, public) VALUES
 ('documents', 'documents', false)
 ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;`,
   rls: `-- ROW LEVEL SECURITY POLICIES
+-- 1. Overarching Admin/Editor policies
 DO $$
 DECLARE
     t TEXT;
@@ -112,7 +113,26 @@ BEGIN
         ', t, t);
     END LOOP;
 END;
-$$;`,
+$$;
+
+-- 2. Enable public read, insert, and delete for media_vault and ai_analysis_results (used by anonymous client and server proxies)
+ALTER TABLE public.media_vault ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_public_read_media_vault ON public.media_vault;
+CREATE POLICY p_public_read_media_vault ON public.media_vault FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS p_public_insert_media_vault ON public.media_vault;
+CREATE POLICY p_public_insert_media_vault ON public.media_vault FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_public_delete_media_vault ON public.media_vault;
+CREATE POLICY p_public_delete_media_vault ON public.media_vault FOR DELETE USING (true);
+
+ALTER TABLE public.ai_analysis_results ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS p_public_read_ai_analysis_results ON public.ai_analysis_results;
+CREATE POLICY p_public_read_ai_analysis_results ON public.ai_analysis_results FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS p_public_insert_ai_analysis_results ON public.ai_analysis_results;
+CREATE POLICY p_public_insert_ai_analysis_results ON public.ai_analysis_results FOR INSERT WITH CHECK (true);`,
+TargetContent:
   auth: `-- USER PROFILE TRIGGERS & HELPERS
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$

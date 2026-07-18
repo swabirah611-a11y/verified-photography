@@ -478,7 +478,36 @@ export interface CmsConfig {
     googleAnalyticsId: string;
     emailNotifications: string;
     whatsappPhone: string;
+    sectionsOrder?: string[];
+    sectionsVisibility?: Record<string, boolean>;
+    sectionsDraftState?: Record<string, boolean>;
+    sectionData?: Record<string, any>;
+    versions?: Array<{
+      id: string;
+      timestamp: string;
+      note: string;
+      configSnapshot: any;
+    }>;
   };
+  pages?: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    seoTitle?: string;
+    seoDescription?: string;
+    visible: boolean;
+    sectionsOrder?: string[];
+  }>;
+  customSections?: Record<string, {
+    title: string;
+    heading: string;
+    description: string;
+    bgImage?: string;
+    ctaText?: string;
+    ctaLink?: string;
+    alignment?: 'left' | 'center' | 'right';
+    themeMode?: 'light' | 'dark' | 'ambient';
+  }>;
 }
 
 export const DEFAULT_CMS_CONFIG: CmsConfig = {
@@ -807,6 +836,43 @@ export async function getCmsConfig(): Promise<CmsConfig> {
 
   if (supabase) {
     try {
+      // 1. Fetch from website_settings table (stores entire CmsConfig JSON)
+      const { data: wsData, error: wsError } = await supabase
+        .from('website_settings')
+        .select('id, settings')
+        .limit(1)
+        .maybeSingle();
+
+      if (!wsError && wsData && wsData.settings) {
+        localStorage.setItem('verified_website_settings_row_id', wsData.id);
+        const parsedSettings = typeof wsData.settings === 'string'
+          ? JSON.parse(wsData.settings)
+          : wsData.settings;
+
+        const mergedConfig = {
+          ...DEFAULT_CMS_CONFIG,
+          ...parsedSettings,
+          theme: { ...DEFAULT_CMS_CONFIG.theme, ...(parsedSettings.theme || {}) },
+          hero: { ...DEFAULT_CMS_CONFIG.hero, ...(parsedSettings.hero || {}) },
+          navigation: { ...DEFAULT_CMS_CONFIG.navigation, ...(parsedSettings.navigation || {}) },
+          about: { ...DEFAULT_CMS_CONFIG.about, ...(parsedSettings.about || {}) },
+          footer: { ...DEFAULT_CMS_CONFIG.footer, ...(parsedSettings.footer || {}) },
+          seo: { ...DEFAULT_CMS_CONFIG.seo, ...(parsedSettings.seo || {}) },
+          advanced: { ...DEFAULT_CMS_CONFIG.advanced, ...(parsedSettings.advanced || {}) }
+        };
+
+        localStorage.setItem('verified_cms_config', JSON.stringify(mergedConfig));
+        return mergedConfig as CmsConfig;
+      } else if (!wsData && !wsError) {
+        await supabase
+          .from('website_settings')
+          .insert([{ settings: config }]);
+      }
+    } catch (err: any) {
+      console.warn('website_settings fetch failed, falling back:', err.message);
+    }
+
+    try {
       const { data, error } = await supabase
         .from('cms_config')
         .select('id, site_name, logo, favicon, primary_color, secondary_color, accent_color, hero_title, hero_subtitle, about_text, footer_text, contact_email, phone, whatsapp, address, maintenance_mode')
@@ -850,6 +916,46 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
   window.dispatchEvent(new Event('cms_config_updated'));
 
   if (supabase) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        console.warn('Unauthorized: Session required for saving configuration.');
+        return false;
+      }
+
+      // 1. Save full JSON to website_settings
+      let wsRowId = localStorage.getItem('verified_website_settings_row_id');
+      if (!wsRowId) {
+        const { data: existing, error: wsFetchErr } = await supabase
+          .from('website_settings')
+          .select('id')
+          .limit(1)
+          .maybeSingle();
+        if (!wsFetchErr && existing) {
+          wsRowId = existing.id;
+          localStorage.setItem('verified_website_settings_row_id', existing.id);
+        }
+      }
+
+      if (wsRowId) {
+        await supabase
+          .from('website_settings')
+          .update({ settings: config })
+          .eq('id', wsRowId);
+      } else {
+        const { data: wsInserted, error: wsInsertErr } = await supabase
+          .from('website_settings')
+          .insert([{ settings: config }])
+          .select('id')
+          .single();
+        if (!wsInsertErr && wsInserted) {
+          localStorage.setItem('verified_website_settings_row_id', wsInserted.id);
+        }
+      }
+    } catch (err: any) {
+      console.warn('website_settings save failed, continuing to legacy cms_config:', err.message);
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {

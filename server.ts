@@ -227,8 +227,16 @@ Response Schema:
   }
 }`;
 
+      const imagePart = {
+        inlineData: {
+          data: base64,
+          mimeType: mimeType
+        }
+      };
+      const textPart = { text: prompt };
+
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-flash-latest",
         contents: { parts: [imagePart, textPart] },
         config: {
           responseMimeType: "application/json"
@@ -297,10 +305,33 @@ Response Schema:
       });
 
     } catch (err: any) {
-      console.error("[AI Vision Service Exception]", err);
-      return res.status(500).json({
+      const errMsg = err.message || String(err);
+      const isQuota = errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("429");
+      const isDenied = errMsg.includes("PERMISSION_DENIED") || errMsg.includes("denied access") || errMsg.includes("403");
+
+      if (isQuota) {
+        console.warn("\n======================================================================");
+        console.warn("⚠️  GEMINI API QUOTA EXCEEDED (RESOURCE EXHAUSTED)");
+        console.warn("Your Gemini API key is working, but has exceeded its daily free-tier limit");
+        console.warn("or has 0 token quota. The application is automatically falling back");
+        console.warn("to local offline vision and metadata classification.");
+        console.warn("======================================================================\n");
+      } else if (isDenied) {
+        console.warn("\n======================================================================");
+        console.warn("⚠️  GEMINI API PERMISSION DENIED (403)");
+        console.warn("Your project is currently denied access to this model (e.g., gemini-3.5-flash).");
+        console.warn("This usually means you are using a free-tier key that does not support");
+        console.warn("advanced pre-release models, or needs to enable the paid model flow.");
+        console.warn("The application is automatically falling back to local offline metadata.");
+        console.warn("======================================================================\n");
+      } else {
+        console.error("[AI Vision Service Exception]", err);
+      }
+
+      // Return a 200 with success: false and ANALYSIS_EXCEPTION so the client gracefully falls back
+      return res.status(200).json({
         success: false,
-        error: `AI visual intelligence execution failed: ${err.message || err}`,
+        error: `AI visual intelligence skipped (offline fallback): ${errMsg}`,
         code: "ANALYSIS_EXCEPTION",
         isDuplicate,
         duplicateFilename

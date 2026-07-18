@@ -14,6 +14,7 @@ import {
   Link2
 } from 'lucide-react';
 import { CmsConfig } from '../../lib/supabase';
+import MediaUploader from './MediaUploader';
 
 interface SectionManagersProps {
   config: CmsConfig;
@@ -180,22 +181,13 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
               
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Cinematic Background Image URL</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={formData.hero.bgImage}
-                      onChange={(e) => handleChange('hero', 'bgImage', e.target.value)}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:border-[#2EC4B6] outline-none transition-colors"
-                    />
-                    <button 
-                      type="button"
-                      onClick={() => handlePrefillImage('hero', 'bgImage', 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=1200')}
-                      className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[10px] font-mono text-[#A7C4B8] border border-white/5"
-                    >
-                      Prefill
-                    </button>
-                  </div>
+                  <MediaUploader
+                    value={formData.hero.bgImage}
+                    onChange={(url) => handleChange('hero', 'bgImage', url)}
+                    folder="hero"
+                    label="Cinematic Background Image"
+                    aspectRatio="aspect-[16/9]"
+                  />
                 </div>
 
                 <div>
@@ -489,12 +481,12 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Founder Photo URL</label>
-                  <input 
-                    type="text" 
+                  <MediaUploader
                     value={formData.about.founderPhoto}
-                    onChange={(e) => handleChange('about', 'founderPhoto', e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:border-[#2EC4B6] outline-none"
+                    onChange={(url) => handleChange('about', 'founderPhoto', url)}
+                    folder="about"
+                    label="Founder Photo"
+                    aspectRatio="aspect-[1/1]"
                   />
                 </div>
 

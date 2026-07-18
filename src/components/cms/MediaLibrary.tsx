@@ -45,6 +45,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { supabase, getExhibitions, saveExhibition, deleteExhibition, Exhibition } from '../../lib/supabase';
+import MediaUploader from './MediaUploader';
 
 // Define the interface for the rich assets managed in the DAM system
 interface DamAsset {
@@ -444,7 +445,10 @@ export default function MediaLibrary() {
         };
 
         const { error: dbErr } = await supabase.from('media_vault').insert([dbRow]);
-        if (dbErr) throw new Error(`Database insert failed: ${dbErr.message}`);
+        if (dbErr) {
+          console.warn('Database registry failed, utilizing local fallback metadata:', dbErr.message);
+          showToast(`⚠ Database sync skipped: ${dbErr.message}`, 'warn');
+        }
 
         // Update queue item status to 'analyzing'
         updateQueueItemStatus(nextItem.id, 'analyzing', 92, uploadSpeed);
@@ -477,9 +481,14 @@ export default function MediaLibrary() {
             }
           } else {
             const resultData = await aiResponse.json();
-            aiResult = resultData.analysis;
-            if (resultData.isDuplicate) {
-              showToast(`⚠ Warning: Possible duplicate detected (${resultData.duplicateFilename})`, 'warn');
+            if (resultData.success === false) {
+              console.warn("AI analysis was skipped or failed on server:", resultData.error);
+              showToast("✓ File uploaded (Offline metadata used)", "info");
+            } else {
+              aiResult = resultData.analysis;
+              if (resultData.isDuplicate) {
+                showToast(`⚠ Warning: Possible duplicate detected (${resultData.duplicateFilename})`, 'warn');
+              }
             }
           }
         } catch (aiEx: any) {
@@ -1794,39 +1803,13 @@ export default function MediaLibrary() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Cover Image URL</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={exhibFormCover}
-                    onChange={e => setExhibFormCover(e.target.value)}
-                    placeholder="Reference URL from Media Vault"
-                    required
-                    className="flex-1 px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white focus:border-[#2EC4B6] outline-none"
-                  />
-                  <div className="shrink-0 relative group">
-                    <button 
-                      type="button" 
-                      className="px-3 py-2.5 bg-white/5 hover:bg-white/10 text-xs font-mono text-[#2EC4B6] rounded-xl border border-white/5 cursor-pointer"
-                    >
-                      Pick
-                    </button>
-                    {/* Quick Picker dropdown with available media assets */}
-                    <div className="hidden group-focus-within:block group-hover:block absolute right-0 top-full mt-1 z-50 p-2 w-64 max-h-48 overflow-y-auto bg-zinc-950 border border-white/10 rounded-lg shadow-2xl grid grid-cols-3 gap-1">
-                      {assets.slice(0, 9).map(a => (
-                        <button 
-                          key={a.id} 
-                          type="button"
-                          onClick={() => setExhibFormCover(a.url)}
-                          className="aspect-video w-full rounded overflow-hidden border border-white/5 hover:border-[#2EC4B6]"
-                        >
-                          <img src={a.thumbnail_url || a.url} alt="" className="w-full h-full object-cover" />
-                        </button>
-                      ))}
-                      {assets.length === 0 && <span className="col-span-full text-[9px] text-brand-muted text-center py-2">No media available</span>}
-                    </div>
-                  </div>
-                </div>
+                <MediaUploader
+                  value={exhibFormCover}
+                  onChange={setExhibFormCover}
+                  folder="gallery"
+                  label="Exhibition Cover Image"
+                  aspectRatio="aspect-[16/9]"
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-white/5">

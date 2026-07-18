@@ -24,6 +24,7 @@ import { getAdminSession, getCmsConfig, DEFAULT_CMS_CONFIG, CmsConfig, supabase 
 import EditableText from './components/EditableText';
 import VisualEditorOverlay from './components/VisualEditorOverlay';
 import ImageReplacerModal from './components/ImageReplacerModal';
+import CustomSection from './components/CustomSection';
 
 export default function App() {
   const [cmsConfig, setCmsConfig] = useState<CmsConfig>(DEFAULT_CMS_CONFIG);
@@ -35,6 +36,7 @@ export default function App() {
   const [isVisualEditMode, setIsVisualEditMode] = useState(false);
   const [deviceView, setDeviceView] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [sectionsOrder, setSectionsOrder] = useState<string[]>([
+    'home',
     'about',
     'services',
     'portfolio',
@@ -45,6 +47,7 @@ export default function App() {
     'contact'
   ]);
   const [sectionsVisibility, setSectionsVisibility] = useState<Record<string, boolean>>({
+    home: true,
     about: true,
     services: true,
     portfolio: true,
@@ -55,6 +58,10 @@ export default function App() {
     contact: true
   });
   const [imageReplacerField, setImageReplacerField] = useState<{ section: string; field: string } | null>(null);
+
+  // Undo / Redo engine stacks
+  const [undoStack, setUndoStack] = useState<CmsConfig[]>([]);
+  const [redoStack, setRedoStack] = useState<CmsConfig[]>([]);
 
   // Hidden Administrative Gateway Routing States
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
@@ -81,10 +88,17 @@ export default function App() {
   useEffect(() => {
     if (cmsConfig?.advanced) {
       if ((cmsConfig.advanced as any).sectionsOrder) {
-        setSectionsOrder((cmsConfig.advanced as any).sectionsOrder);
+        let order = (cmsConfig.advanced as any).sectionsOrder;
+        if (!order.includes('home') && !order.includes('hero')) {
+          order = ['home', ...order];
+        }
+        setSectionsOrder(order);
       }
       if ((cmsConfig.advanced as any).sectionsVisibility) {
-        setSectionsVisibility((cmsConfig.advanced as any).sectionsVisibility);
+        setSectionsVisibility({
+          home: true,
+          ...((cmsConfig.advanced as any).sectionsVisibility || {})
+        });
       }
     }
   }, [cmsConfig]);
@@ -100,12 +114,32 @@ export default function App() {
     return () => window.removeEventListener('popstate', checkVisualEditMode);
   }, [isAdminLoggedIn]);
 
-  // General config updater helper
-  const handleUpdateConfigValue = async (newConfig: CmsConfig) => {
+  // General config updater helper with undo/redo capabilities
+  const handleUpdateConfigValue = async (newConfig: CmsConfig, skipHistory = false) => {
+    if (!skipHistory) {
+      setUndoStack(prev => [...prev, cmsConfig]);
+      setRedoStack([]); // reset redo on new edits
+    }
     setCmsConfig(newConfig);
     const { saveCmsConfig } = await import('./lib/supabase');
     await saveCmsConfig(newConfig);
     window.dispatchEvent(new Event('cms_config_updated'));
+  };
+
+  const handleUndo = () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack(prevStack => prevStack.slice(0, -1));
+    setRedoStack(prevRedo => [...prevRedo, cmsConfig]);
+    handleUpdateConfigValue(prev, true);
+  };
+
+  const handleRedo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack(prevRedo => prevRedo.slice(0, -1));
+    setUndoStack(prevStack => [...prevStack, cmsConfig]);
+    handleUpdateConfigValue(next, true);
   };
 
   const updateField = (section: keyof CmsConfig, field: string, value: string) => {
@@ -434,20 +468,222 @@ export default function App() {
   };
 
   const renderSection = (sectionId: string) => {
-    switch (sectionId) {
+    const baseId = sectionId.split('_')[0];
+    
+    // Retrieve custom section data if it's a duplicated section
+    let activeConfig = cmsConfig;
+    if (sectionId !== baseId) {
+      const customData = cmsConfig.advanced?.sectionData?.[sectionId];
+      if (customData) {
+        activeConfig = {
+          ...cmsConfig,
+          [baseId]: customData
+        };
+      }
+    }
+
+    const handleUpdateSectionField = (field: string, val: string) => {
+      if (sectionId === baseId) {
+        updateField(baseId as any, field, val);
+      } else {
+        const currentData = cmsConfig.advanced?.sectionData?.[sectionId] || { ...cmsConfig[baseId as keyof CmsConfig] };
+        const updatedData = {
+          ...currentData,
+          [field]: val
+        };
+        const updated = {
+          ...cmsConfig,
+          advanced: {
+            ...cmsConfig.advanced,
+            sectionData: {
+              ...(cmsConfig.advanced as any).sectionData,
+              [sectionId]: updatedData
+            }
+          } as any
+        };
+        handleUpdateConfigValue(updated);
+      }
+    };
+
+    // If it's a user-created custom section
+    if (sectionId.startsWith('custom_')) {
+      const customData = cmsConfig.customSections?.[sectionId];
+      return (
+        <CustomSection
+          sectionId={sectionId}
+          sectionData={customData}
+          isVisualEditMode={isVisualEditMode}
+          onUpdateField={(field, val) => {
+            const currentSections = cmsConfig.customSections || {};
+            const currentSec = currentSections[sectionId] || { title: '', heading: '', description: '' };
+            const updatedSec = { ...currentSec, [field]: val };
+            const updated = {
+              ...cmsConfig,
+              customSections: {
+                ...currentSections,
+                [sectionId]: updatedSec
+              }
+            };
+            handleUpdateConfigValue(updated);
+          }}
+          onTriggerImageReplacer={() => handleTriggerImageReplacer('customSections', sectionId + '.bgImage')}
+        />
+      );
+    }
+
+    switch (baseId) {
+      case 'home':
+      case 'hero':
+        return (
+          <section
+            id="home"
+            className="relative min-h-screen w-full flex items-center justify-center pt-24 pb-12 lg:py-0 z-10"
+          >
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+              <div className="grid lg:grid-cols-12 gap-12 lg:gap-8 items-center min-h-[calc(100vh-140px)]">
+                
+                {/* Left Side Info and Action */}
+                <div className="lg:col-span-6 flex flex-col justify-center text-left">
+                  
+                  {/* Brand Indicator */}
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    className="flex items-center gap-2 mb-4"
+                  >
+                    <div className="w-2.5 h-2.5 rounded-full bg-brand-accent box-glow animate-pulse" />
+                    <EditableText
+                      value={activeConfig?.hero?.businessName || 'VERIFIED PHOTOGRAPHY'}
+                      isEditable={isVisualEditMode}
+                      onSave={(val) => handleUpdateSectionField('businessName', val)}
+                      className="font-space font-bold tracking-[0.25em] text-xs text-brand-glow uppercase"
+                    />
+                  </motion.div>
+
+                  {/* Majestic Headline */}
+                  <motion.h1
+                    initial={{ opacity: 0, y: 25 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.1, ease: 'easeOut' }}
+                    className="text-4xl sm:text-5xl lg:text-6xl font-space font-bold text-brand-text leading-tight tracking-tight mb-6"
+                  >
+                    <EditableText
+                      value={activeConfig?.hero?.mainHeading || activeConfig?.hero?.heading || 'Capturing Stories'}
+                      isEditable={isVisualEditMode}
+                      onSave={(val) => handleUpdateSectionField('heading', val)}
+                    /> <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-accent via-brand-glow to-brand-text">
+                      <EditableText
+                        value={activeConfig?.hero?.subheading || activeConfig?.hero?.headingHighlight || 'Beyond the Lens'}
+                        isEditable={isVisualEditMode}
+                        onSave={(val) => handleUpdateSectionField('headingHighlight', val)}
+                      />
+                    </span>
+                  </motion.h1>
+
+                  {/* Supporting Copy */}
+                  <div className="mb-8 max-w-xl">
+                    <EditableText
+                      value={activeConfig?.hero?.description || 'Professional photography that transforms moments into timeless memories. Weddings, portraits, graduations, birthdays, events, and commercial photography with creativity, precision, and passion.'}
+                      isEditable={isVisualEditMode}
+                      multiline={true}
+                      onSave={(val) => handleUpdateSectionField('description', val)}
+                      className="text-sm md:text-base text-brand-muted leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Interactive Location Badges */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.3 }}
+                    className="flex flex-wrap gap-4 items-center mb-10"
+                  >
+                    <span className="text-xs text-brand-muted uppercase font-mono tracking-wider font-semibold">Service Hubs:</span>
+                    <div className="flex gap-2">
+                      {(activeConfig?.hero?.locations || ['Uromi', 'Ekpoma', 'Auchi']).map((loc) => (
+                        <motion.div
+                           key={loc}
+                           whileHover={{ scale: 1.05, y: -2 }}
+                           className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#10261F] border border-[#2EC4B6]/25 text-xs text-brand-text box-glow font-space"
+                        >
+                          <MapPin className="w-3.5 h-3.5 text-brand-accent" />
+                          <span>{loc}</span>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+
+                  {/* Premium Button CTAs */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 25 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.4 }}
+                    className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4"
+                  >
+                    {/* Primary Button */}
+                    <button
+                      onClick={() => handleNavigate('contact')}
+                      className="group px-8 py-4 bg-gradient-to-r from-brand-accent to-brand-glow hover:from-brand-glow hover:to-brand-accent text-brand-bg font-space font-bold text-sm rounded-xl transition-all duration-500 hover:shadow-[0_0_25px_rgba(46,196,182,0.5)] active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <EditableText
+                        value={activeConfig?.hero?.ctaText || 'Book a Session'}
+                        isEditable={isVisualEditMode}
+                        onSave={(val) => handleUpdateSectionField('ctaText', val)}
+                      />
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform duration-300" />
+                    </button>
+
+                    {/* Secondary Button */}
+                    <button
+                      onClick={() => handleNavigate('portfolio')}
+                      className="px-8 py-4 bg-white/5 hover:bg-[#10261F] text-brand-text hover:text-brand-glow font-space font-semibold text-sm rounded-xl transition-all duration-300 border border-white/5 hover:border-brand-accent/40 active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Camera className="w-4 h-4 text-brand-accent" />
+                      <EditableText
+                        value={activeConfig?.hero?.secondaryCtaText || 'Explore Portfolio'}
+                        isEditable={isVisualEditMode}
+                        onSave={(val) => handleUpdateSectionField('secondaryCtaText', val)}
+                      />
+                    </button>
+                  </motion.div>
+
+                </div>
+
+                {/* Right Side: Immersive 3D Experience (Floating DSLR and floating accessories) */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 1.2, delay: 0.2, ease: 'easeOut' }}
+                  className="lg:col-span-6 flex items-center justify-center relative"
+                >
+                  <HeroCamera3D />
+                </motion.div>
+
+              </div>
+            </div>
+
+            {/* Scroll down indicator */}
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 text-brand-muted/50 hover:text-brand-accent cursor-pointer transition-colors" onClick={() => handleNavigate('about')}>
+              <span className="text-[10px] font-mono uppercase tracking-widest">Scroll Down</span>
+              <ChevronDown className="w-4 h-4 animate-bounce" />
+            </div>
+          </section>
+        );
       case 'about':
         return (
           <AboutSection 
-            cmsConfig={cmsConfig} 
+            cmsConfig={activeConfig} 
             isVisualEditMode={isVisualEditMode} 
-            onUpdateAboutField={(field, val) => updateField('about', field, val)} 
+            onUpdateAboutField={(field, val) => handleUpdateSectionField(field, val)} 
           />
         );
       case 'services':
         return (
           <ServicesSection 
             onBookService={(serviceName) => handleBookShortcut(serviceName)} 
-            cmsConfig={cmsConfig} 
+            cmsConfig={activeConfig} 
           />
         );
       case 'portfolio':
@@ -460,15 +696,15 @@ export default function App() {
         return (
           <PricingSection 
             onSelectPlan={(planName, category) => handleBookShortcut(category, planName)} 
-            cmsConfig={cmsConfig} 
+            cmsConfig={activeConfig} 
           />
         );
       case 'faq':
-        return <FaqSection cmsConfig={cmsConfig} />;
+        return <FaqSection cmsConfig={activeConfig} />;
       case 'team':
-        return <TeamSection cmsConfig={cmsConfig} />;
+        return <TeamSection cmsConfig={activeConfig} />;
       case 'blogs':
-        return <BlogSection cmsConfig={cmsConfig} />;
+        return <BlogSection cmsConfig={activeConfig} />;
       case 'contact':
         return (
           <ContactSection 
@@ -528,6 +764,10 @@ export default function App() {
             };
             handleUpdateConfigValue(updated);
           }}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          canUndo={undoStack.length > 0}
+          canRedo={redoStack.length > 0}
         />
       )}
 
@@ -563,156 +803,27 @@ export default function App() {
           cmsConfig={cmsConfig}
         />
 
-        {/* 3. CINEMATIC FULL-SCREEN HERO SECTION (100vh) */}
-        <section
-          id="home"
-          className="relative min-h-screen w-full flex items-center justify-center pt-24 pb-12 lg:py-0 z-10"
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-            <div className="grid lg:grid-cols-12 gap-12 lg:gap-8 items-center min-h-[calc(100vh-140px)]">
-              
-              {/* Left Side Info and Action */}
-              <div className="lg:col-span-6 flex flex-col justify-center text-left">
-                
-                {/* Brand Indicator */}
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                  className="flex items-center gap-2 mb-4"
-                >
-                  <div className="w-2.5 h-2.5 rounded-full bg-brand-accent box-glow animate-pulse" />
-                  <EditableText
-                    value={cmsConfig?.hero?.businessName || 'VERIFIED PHOTOGRAPHY'}
-                    isEditable={isVisualEditMode}
-                    onSave={(val) => updateField('hero', 'businessName', val)}
-                    className="font-space font-bold tracking-[0.25em] text-xs text-brand-glow uppercase"
-                  />
-                </motion.div>
-
-                {/* Majestic Headline */}
-                <motion.h1
-                  initial={{ opacity: 0, y: 25 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.1, ease: 'easeOut' }}
-                  className="text-4xl sm:text-5xl lg:text-6xl font-space font-bold text-brand-text leading-tight tracking-tight mb-6"
-                >
-                  <EditableText
-                    value={cmsConfig?.hero?.heading || 'Capturing Stories'}
-                    isEditable={isVisualEditMode}
-                    onSave={(val) => updateField('hero', 'heading', val)}
-                  /> <br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand-accent via-brand-glow to-brand-text">
-                    <EditableText
-                      value={cmsConfig?.hero?.headingHighlight || 'Beyond the Lens'}
-                      isEditable={isVisualEditMode}
-                      onSave={(val) => updateField('hero', 'headingHighlight', val)}
-                    />
-                  </span>
-                </motion.h1>
-
-                {/* Supporting Copy */}
-                <div className="mb-8 max-w-xl">
-                  <EditableText
-                    value={cmsConfig?.hero?.description || 'Professional photography that transforms moments into timeless memories. Weddings, portraits, graduations, birthdays, events, and commercial photography with creativity, precision, and passion.'}
-                    isEditable={isVisualEditMode}
-                    multiline={true}
-                    onSave={(val) => updateField('hero', 'description', val)}
-                    className="text-sm md:text-base text-brand-muted leading-relaxed"
-                  />
-                </div>
-
-                {/* Interactive Location Badges */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.3 }}
-                  className="flex flex-wrap gap-4 items-center mb-10"
-                >
-                  <span className="text-xs text-brand-muted uppercase font-mono tracking-wider font-semibold">Service Hubs:</span>
-                  <div className="flex gap-2">
-                    {(cmsConfig?.hero?.locations || ['Uromi', 'Ekpoma', 'Auchi']).map((loc) => (
-                      <motion.div
-                         key={loc}
-                         whileHover={{ scale: 1.05, y: -2 }}
-                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#10261F] border border-[#2EC4B6]/25 text-xs text-brand-text box-glow font-space"
-                      >
-                        <MapPin className="w-3.5 h-3.5 text-brand-accent" />
-                        <span>{loc}</span>
-                      </motion.div>
-                    ))}
-                  </div>
-                </motion.div>
-
-                {/* Premium Button CTAs */}
-                <motion.div
-                  initial={{ opacity: 0, y: 25 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.4 }}
-                  className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4"
-                >
-                  {/* Primary Button */}
-                  <button
-                    onClick={() => handleNavigate('contact')}
-                    className="group px-8 py-4 bg-gradient-to-r from-brand-accent to-brand-glow hover:from-brand-glow hover:to-brand-accent text-brand-bg font-space font-bold text-sm rounded-xl transition-all duration-500 hover:shadow-[0_0_25px_rgba(46,196,182,0.5)] active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <EditableText
-                      value={cmsConfig?.hero?.ctaText || 'Book a Session'}
-                      isEditable={isVisualEditMode}
-                      onSave={(val) => updateField('hero', 'ctaText', val)}
-                    />
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform duration-300" />
-                  </button>
-
-                  {/* Secondary Button */}
-                  <button
-                    onClick={() => handleNavigate('portfolio')}
-                    className="px-8 py-4 bg-white/5 hover:bg-[#10261F] text-brand-text hover:text-brand-glow font-space font-semibold text-sm rounded-xl transition-all duration-300 border border-white/5 hover:border-brand-accent/40 active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Camera className="w-4 h-4 text-brand-accent" />
-                    <EditableText
-                      value={cmsConfig?.hero?.secondaryCtaText || 'Explore Portfolio'}
-                      isEditable={isVisualEditMode}
-                      onSave={(val) => updateField('hero', 'secondaryCtaText', val)}
-                    />
-                  </button>
-                </motion.div>
-
-              </div>
-
-              {/* Right Side: Immersive 3D Experience (Floating DSLR and floating accessories) */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 1.2, delay: 0.2, ease: 'easeOut' }}
-                className="lg:col-span-6 flex items-center justify-center relative"
-              >
-                <HeroCamera3D />
-              </motion.div>
-
-            </div>
-          </div>
-
-          {/* Scroll down indicator */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 text-brand-muted/50 hover:text-brand-accent cursor-pointer transition-colors" onClick={() => handleNavigate('about')}>
-            <span className="text-[10px] font-mono uppercase tracking-widest">Scroll Down</span>
-            <ChevronDown className="w-4 h-4 animate-bounce" />
-          </div>
-        </section>
-
         {/* 4. DYNAMIC MODULAR WEBSITE CONTENT SECTIONS */}
         {sectionsOrder.map((sectionId) => {
           const isVisible = sectionsVisibility[sectionId] !== false;
+          const isDraft = cmsConfig.advanced?.sectionsDraftState?.[sectionId] === true;
+          
           if (!isVisible && !isVisualEditMode) return null;
+          if (isDraft && !isVisualEditMode) return null;
 
           return (
             <div 
               key={sectionId} 
-              className={`relative ${!isVisible ? 'opacity-30 border-2 border-dashed border-red-500/20' : ''}`}
+              className={`relative ${!isVisible ? 'opacity-30 border-2 border-dashed border-red-500/20' : ''} ${isDraft ? 'opacity-50 border-2 border-dashed border-yellow-500/20' : ''}`}
             >
               {!isVisible && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-3 py-1 rounded-full bg-red-500/80 backdrop-blur-md text-[9px] font-mono font-bold tracking-widest text-white flex items-center gap-1">
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-3 py-1 rounded-full bg-red-500/80 backdrop-blur-md text-[9px] font-mono font-bold tracking-widest text-white flex items-center gap-1 shadow-lg">
                   <span>●</span> <span>HIDDEN FROM PUBLIC VIEW</span>
+                </div>
+              )}
+              {isDraft && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-3 py-1 rounded-full bg-yellow-600/80 backdrop-blur-md text-[9px] font-mono font-bold tracking-widest text-white flex items-center gap-1 shadow-lg">
+                  <span>●</span> <span>DRAFT MODE (UNPUBLISHED)</span>
                 </div>
               )}
               {renderSection(sectionId)}

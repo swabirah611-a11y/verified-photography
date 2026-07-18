@@ -8,6 +8,7 @@ import {
   Check, 
   Sparkles 
 } from 'lucide-react';
+import MediaUploader from './cms/MediaUploader';
 
 interface ImageReplacerModalProps {
   isOpen: boolean;
@@ -95,24 +96,18 @@ export default function ImageReplacerModal({
           </button>
         </div>
 
-        {/* Custom URL input */}
-        <div className="space-y-2 mb-6">
-          <label className="text-[10px] font-mono text-[#A7C4B8] uppercase block">Provide Image Asset Link</label>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#A7C4B8]" />
-              <input
-                type="text"
-                placeholder="https://images.unsplash.com/..."
-                value={customUrl}
-                onChange={(e) => {
-                  setCustomUrl(e.target.value);
-                  setSelectedPreset(null);
-                }}
-                className="w-full pl-9 pr-4 py-2.5 bg-black/40 border border-white/10 rounded-xl text-white text-xs font-mono placeholder-white/30 focus:outline-none focus:border-[#2EC4B6]"
-              />
-            </div>
-          </div>
+        {/* Real-time Uploader & Asset Lockbox */}
+        <div className="mb-6">
+          <MediaUploader
+            value={customUrl}
+            onChange={(url) => {
+              setCustomUrl(url);
+              setSelectedPreset(null);
+            }}
+            folder="media"
+            label="Provide or Upload Image Asset"
+            aspectRatio="aspect-[16/9]"
+          />
         </div>
 
         <div className="h-px bg-white/5 w-full my-4" />

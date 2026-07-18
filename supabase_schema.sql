@@ -695,6 +695,22 @@ CREATE POLICY p_public_insert_reservation_vault ON public.reservation_vault FOR 
 CREATE POLICY p_public_insert_bookings ON public.bookings FOR INSERT WITH CHECK (true);
 CREATE POLICY p_public_insert_messages ON public.messages FOR INSERT WITH CHECK (true);
 
+-- 5. Enable public read, insert, and delete for media_vault and ai_analysis_results (used by the anonymous client and server proxies)
+DROP POLICY IF EXISTS p_public_read_media_vault ON public.media_vault;
+CREATE POLICY p_public_read_media_vault ON public.media_vault FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS p_public_insert_media_vault ON public.media_vault;
+CREATE POLICY p_public_insert_media_vault ON public.media_vault FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS p_public_delete_media_vault ON public.media_vault;
+CREATE POLICY p_public_delete_media_vault ON public.media_vault FOR DELETE USING (true);
+
+DROP POLICY IF EXISTS p_public_read_ai_analysis_results ON public.ai_analysis_results;
+CREATE POLICY p_public_read_ai_analysis_results ON public.ai_analysis_results FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS p_public_all_ai_analysis_results ON public.ai_analysis_results;
+CREATE POLICY p_public_all_ai_analysis_results ON public.ai_analysis_results FOR ALL USING (true);
+
 -- ---------------------------------------------------------------------
 -- 12. AUTOMATED STORAGE BUCKET CREATION & PUBLIC ACCESS POLICIES
 -- ---------------------------------------------------------------------
