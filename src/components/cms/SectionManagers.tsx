@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Save, 
   HelpCircle, 
@@ -31,6 +31,12 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
   
   const [newTimelineTitle, setNewTimelineTitle] = useState('');
   const [newTimelineDesc, setNewTimelineDesc] = useState('');
+  const [isAboutAiScanning, setIsAboutAiScanning] = useState(false);
+  const [aboutAiError, setAboutAiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFormData(config);
+  }, [config, activeSectionTab]);
 
   // Handle updates locally first
   const handleChange = (section: keyof CmsConfig, field: string, value: any) => {
@@ -134,6 +140,49 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
 
   const handleRemoveGalleryFrame = (index: number) => {
     handleChange('about', 'galleryFrames', (formData.about.galleryFrames || []).filter((_, i) => i !== index));
+  };
+
+  const handleAboutAiScan = async (imageUrl: string) => {
+    if (!imageUrl) return;
+    setIsAboutAiScanning(true);
+    setAboutAiError(null);
+    setFormData((prev) => ({
+      ...prev,
+      about: { ...prev.about, founderPhoto: imageUrl }
+    }));
+
+    try {
+      const response = await fetch('/api/ai/about', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl,
+          founderName: formData.about.founderName,
+          founderRole: formData.about.founderRole
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'About image analysis failed.');
+      const suggestion = payload.analysis || {};
+
+      setFormData((prev) => ({
+        ...prev,
+        about: {
+          ...prev.about,
+          founderPhoto: imageUrl,
+          title: suggestion.title || prev.about.title,
+          heading: suggestion.heading || prev.about.heading,
+          headingHighlight: suggestion.headingHighlight || prev.about.headingHighlight,
+          description: suggestion.description || prev.about.description,
+          founderRole: suggestion.founderRole || prev.about.founderRole,
+          founderQuote: suggestion.founderQuote || prev.about.founderQuote
+        }
+      }));
+    } catch (error: any) {
+      setAboutAiError(error.message || String(error));
+    } finally {
+      setIsAboutAiScanning(false);
+    }
   };
 
   // Prefill image URL helper
@@ -511,11 +560,30 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
                 <div>
                   <MediaUploader
                     value={formData.about.founderPhoto}
-                    onChange={(url) => handleChange('about', 'founderPhoto', url)}
+                    onChange={(url) => {
+                      handleChange('about', 'founderPhoto', url);
+                      if (url) void handleAboutAiScan(url);
+                    }}
                     folder="about"
                     label="Founder Photo"
                     aspectRatio="aspect-[1/1]"
                   />
+                  <div className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-purple-400/20 bg-purple-500/5 p-3">
+                    <div>
+                      <p className="text-[11px] font-space font-bold text-white">AI About Assistant</p>
+                      <p className="text-[9px] text-[#A7C4B8]">Runs automatically after upload and prepares the narrative for review.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleAboutAiScan(formData.about.founderPhoto)}
+                      disabled={!formData.about.founderPhoto || isAboutAiScanning}
+                      className="shrink-0 px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-400/30 text-purple-200 disabled:opacity-40 text-[10px] font-bold flex items-center gap-1.5"
+                    >
+                      {isAboutAiScanning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                      {isAboutAiScanning ? 'Scanning…' : 'Scan Again'}
+                    </button>
+                  </div>
+                  {aboutAiError && <p className="mt-2 text-[10px] font-mono text-red-400">AI scan failed: {aboutAiError}</p>}
                 </div>
 
                 <div>

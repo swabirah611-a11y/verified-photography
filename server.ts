@@ -339,6 +339,44 @@ Response Schema:
     }
   });
 
+  // About-page narrative assistant. It describes the uploaded visual but does
+  // not guess a person's identity, achievements, client totals, or history.
+  app.post("/api/ai/about", async (req, res) => {
+    const { imageUrl, founderName, founderRole } = req.body;
+    if (!imageUrl) return res.status(400).json({ success: false, error: "Upload an About image first." });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(400).json({ success: false, error: "GEMINI_API_KEY is missing on the server." });
+
+    try {
+      const { mimeType, base64 } = await fetchImageAsBase64(imageUrl);
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { headers: { 'User-Agent': 'verified-photography' } } });
+      const prompt = `You are the senior brand copywriter for Verified Photography, a premium Nigerian photography studio.
+Analyze the supplied About/founder photograph and write polished, human, truthful website copy inspired only by visible mood, composition, setting, and professional presentation.
+Known lead name (preserve exactly; never infer identity): ${founderName || '[not supplied]'}
+Known role (preserve if supplied): ${founderRole || '[not supplied]'}
+Return ONLY valid JSON with this exact shape:
+{
+  "title": "Short section pre-title, maximum 5 words",
+  "heading": "Heading prefix, maximum 5 words",
+  "headingHighlight": "Heading highlight, maximum 5 words",
+  "description": "A refined About biography of 70-110 words. Do not invent names, years, awards, locations, equipment, clients, or achievements.",
+  "founderRole": "Use the known role exactly when supplied; otherwise suggest a neutral professional photography role",
+  "founderQuote": "An original first-person creative philosophy, maximum 24 words",
+  "imageTitle": "Accessible descriptive image caption, maximum 12 words"
+}`;
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: { parts: [{ inlineData: { data: base64, mimeType } }, { text: prompt }] },
+        config: { responseMimeType: "application/json" }
+      });
+      if (!response.text) throw new Error("Gemini returned no About analysis.");
+      return res.json({ success: true, analysis: JSON.parse(response.text.trim()) });
+    } catch (error: any) {
+      console.error("[About AI analysis failed]", error);
+      return res.status(500).json({ success: false, error: error?.message || String(error) });
+    }
+  });
+
   // 3. Diagnostics Engine Endpoint
   app.get("/api/diagnose/engine", async (req, res) => {
     const report: any = {
