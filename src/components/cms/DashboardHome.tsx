@@ -40,31 +40,10 @@ export default function DashboardHome({
   // Extract statistics
   const totalGallery = portfolioItems.length;
   const categories = Array.from(new Set(portfolioItems.map(p => p.category)));
-  const totalAlbums = categories.length || 5;
-  const totalTestimonials = cmsConfig.testimonials?.length || 3;
-  const totalBlogs = cmsConfig.blogs?.length || 2;
-  const totalFaqs = cmsConfig.faq?.length || 4;
-
-  // Mock visitor counter stored in localStorage to feel realistic & increment over time
-  const [visitors, setVisitors] = React.useState(() => {
-    const saved = localStorage.getItem('cms_total_visitors');
-    if (saved) return parseInt(saved);
-    const rand = Math.floor(Math.random() * 200) + 1420;
-    localStorage.setItem('cms_total_visitors', String(rand));
-    return rand;
-  });
-
-  React.useEffect(() => {
-    // Simulate incremental real-time traffic
-    const interval = setInterval(() => {
-      setVisitors(prev => {
-        const next = prev + (Math.random() > 0.6 ? 1 : 0);
-        localStorage.setItem('cms_total_visitors', String(next));
-        return next;
-      });
-    }, 15000);
-    return () => clearInterval(interval);
-  }, []);
+  const totalAlbums = categories.length;
+  const totalTestimonials = cmsConfig.testimonials?.length ?? 0;
+  const totalBlogs = cmsConfig.blogs?.length ?? 0;
+  const totalFaqs = cmsConfig.faq?.length ?? 0;
 
   return (
     <div className="space-y-8">
@@ -87,10 +66,8 @@ export default function DashboardHome({
             <Users className="w-4 h-4 text-[#2EC4B6]" />
           </div>
           <div className="mt-4">
-            <h3 className="text-2xl font-space font-bold text-white tracking-tight">{visitors.toLocaleString()}</h3>
-            <p className="text-[9px] font-mono text-emerald-400 mt-1 flex items-center gap-0.5">
-              <span>+12.4% this week</span>
-            </p>
+            <h3 className="text-2xl font-space font-bold text-white tracking-tight">—</h3>
+            <p className="text-[9px] font-mono text-brand-muted mt-1">Analytics not configured</p>
           </div>
         </div>
 

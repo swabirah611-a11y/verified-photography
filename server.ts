@@ -22,7 +22,7 @@ async function fetchImageAsBase64(url: string): Promise<{ mimeType: string; base
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Body parser
   app.use(express.json());

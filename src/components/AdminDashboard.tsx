@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Camera, 
@@ -117,6 +117,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   // Session inactivity states
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [inactivityTimer, setInactivityTimer] = useState(600); // 10 minutes in seconds
+  const inactivityDeadlineRef = useRef(Date.now() + 600_000);
+  const [isAiAutofilling, setIsAiAutofilling] = useState(false);
 
   // Local activity feed list inside session
   const [recentActivity, setRecentActivity] = useState<Array<{ id: string; desc: string; time: string; type: 'info' | 'warn' | 'success' }>>([
@@ -196,6 +198,25 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
   }, []);
 
+  // Keep every dashboard module synchronized with PostgreSQL changes made in
+  // this tab, another tab, or another authenticated CMS session.
+  useEffect(() => {
+    if (!supabase) return;
+
+    const cmsTables = [
+      'hero_canvas', 'about_vision', 'services_offered', 'pricing_packages',
+      'faq_modules', 'studio_team', 'editorial_blogs', 'testimonials', 'nav_socials'
+    ];
+    const channel = supabase.channel('verified_cms_dashboard_live');
+    cmsTables.forEach((table) => {
+      channel.on('postgres_changes', { event: '*', schema: 'public', table }, loadCmsConfigData);
+    });
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, loadBookingsData);
+    channel.subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, []);
+
   // Listen to bookings_updated event
   useEffect(() => {
     window.addEventListener('bookings_updated', loadBookingsData);
@@ -250,33 +271,32 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     };
   }, []);
 
-  // Inactivity tracking: resets timer on activity
+  // Timestamp-based inactivity tracking avoids interval drift and stale state.
   useEffect(() => {
     const resetTimer = () => {
-      setInactivityTimer(600); // Reset to 10 mins
+      inactivityDeadlineRef.current = Date.now() + 600_000;
+      setInactivityTimer(600);
     };
 
-    window.addEventListener('mousemove', resetTimer);
-    window.addEventListener('keypress', resetTimer);
+    window.addEventListener('pointerdown', resetTimer);
+    window.addEventListener('keydown', resetTimer);
+    window.addEventListener('touchstart', resetTimer);
     window.addEventListener('scroll', resetTimer);
-    window.addEventListener('click', resetTimer);
 
     const countdown = setInterval(() => {
-      setInactivityTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(countdown);
-          handleSignOut(); // Expire session
-          return 0;
-        }
-        return prev - 1;
-      });
+      const remaining = Math.max(0, Math.ceil((inactivityDeadlineRef.current - Date.now()) / 1000));
+      setInactivityTimer(remaining);
+      if (remaining === 0) {
+        clearInterval(countdown);
+        void handleSignOut();
+      }
     }, 1000);
 
     return () => {
-      window.removeEventListener('mousemove', resetTimer);
-      window.removeEventListener('keypress', resetTimer);
+      window.removeEventListener('pointerdown', resetTimer);
+      window.removeEventListener('keydown', resetTimer);
+      window.removeEventListener('touchstart', resetTimer);
       window.removeEventListener('scroll', resetTimer);
-      window.removeEventListener('click', resetTimer);
       clearInterval(countdown);
     };
   }, []);
@@ -298,6 +318,82 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     } else {
       alert('Error updating configuration table');
       addActivityLog('CMS configuration save failed', 'warn');
+    }
+  };
+
+  const normalizeAiExhibitionCategory = (value: string): typeof formCategory => {
+    const category = (value || '').toLowerCase();
+    if (category.includes('wedding') || category.includes('traditional')) return 'Weddings';
+    if (category.includes('graduation') || category.includes('campus')) return 'Graduations';
+    if (category.includes('event') || category.includes('birthday') || category.includes('festival') || category.includes('sports')) return 'Events';
+    if (category.includes('commercial') || category.includes('product') || category.includes('corporate')) return 'Commercial';
+    return 'Portraits';
+  };
+
+  const handleAiAutofillExhibition = async () => {
+    setFormError(null);
+    setIsAiAutofilling(true);
+    let imageUrl = formImage;
+    let filename = selectedFile?.name || formImage.split('/').pop() || 'exhibition-image';
+
+    try {
+      // Gemini analyzes the durable Supabase URL, never a temporary browser blob.
+      if (selectedFile) {
+        if (!supabase) throw new Error('Supabase is not connected.');
+        setUploading(true);
+        setUploadProgress(25);
+        const fileExt = selectedFile.name.split('.').pop() || 'jpg';
+        const cleanName = selectedFile.name.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+        const storagePath = `portfolio/${cleanName}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('media-vault').upload(storagePath, selectedFile, {
+          contentType: selectedFile.type,
+          cacheControl: '31536000',
+          upsert: false
+        });
+        if (uploadError) throw new Error(uploadError.message);
+        setUploadProgress(75);
+        imageUrl = supabase.storage.from('media-vault').getPublicUrl(storagePath).data.publicUrl;
+        filename = `${cleanName}.${fileExt}`;
+        const { error: registryError } = await supabase.from('media_vault').insert([{
+          filename,
+          original_filename: selectedFile.name,
+          bucket: 'media-vault',
+          folder: 'portfolio',
+          url: imageUrl,
+          mime_type: selectedFile.type,
+          file_size: selectedFile.size
+        }]);
+        if (registryError) throw new Error(registryError.message);
+        setFormImage(imageUrl);
+        setLocalPreview(imageUrl);
+        setSelectedFile(null);
+        setUploadProgress(100);
+      }
+
+      if (!imageUrl) throw new Error('Upload an image or paste an image URL first.');
+      const response = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl, filename, originalFilename: filename })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'AI analysis failed.');
+
+      const analysis = result.analysis || {};
+      setFormTitle(analysis.title || formTitle);
+      setFormCategory(normalizeAiExhibitionCategory(analysis.category));
+      setFormDescription(analysis.description || formDescription);
+      if (analysis.location) setFormLocation(analysis.location);
+      const camera = analysis.camera || {};
+      const cameraSummary = [camera.camera, camera.lens].filter(Boolean).join(' + ');
+      if (cameraSummary) setFormCameraSetup(cameraSummary);
+      if (!formDate && camera.date_taken) setFormDate(camera.date_taken);
+      addActivityLog(`AI prepared exhibition metadata for review: ${analysis.title || filename}`, 'success');
+    } catch (error: any) {
+      setFormError(`AI Auto-Fill failed: ${error.message || error}`);
+    } finally {
+      setUploading(false);
+      setIsAiAutofilling(false);
     }
   };
 
@@ -962,6 +1058,22 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         <div>
                           <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Narrative Description</label>
                           <textarea rows={3} value={formDescription} onChange={e => setFormDescription(e.target.value)} required className="w-full px-4 py-2 rounded-xl bg-black/40 border border-white/10 text-xs text-white resize-none" />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-[#2EC4B6]/20 bg-[#2EC4B6]/5 p-3">
+                          <div>
+                            <p className="text-xs font-space font-bold text-white">AI Exhibition Assistant</p>
+                            <p className="text-[10px] text-[#A7C4B8]">Analyzes the selected image and fills the form. Review every suggestion before saving.</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAiAutofillExhibition}
+                            disabled={isAiAutofilling || uploading || (!selectedFile && !formImage)}
+                            className="shrink-0 px-4 py-2 rounded-xl bg-purple-500/20 border border-purple-400/30 text-purple-200 disabled:opacity-40 font-space font-bold text-xs flex items-center gap-2"
+                          >
+                            {isAiAutofilling ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                            {isAiAutofilling ? 'Analyzing…' : 'AI Auto-Fill'}
+                          </button>
                         </div>
 
                         {formError && <p className="text-xs text-red-400 font-mono">{formError}</p>}
