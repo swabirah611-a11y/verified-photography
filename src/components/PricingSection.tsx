@@ -12,8 +12,12 @@ interface PricingSectionProps {
 export default function PricingSection({ onSelectPlan, cmsConfig }: PricingSectionProps) {
   const [activeTestimonial, setActiveTestimonial] = useState<number>(0);
 
-  const plans = cmsConfig?.pricing?.packages || PRICING_PLANS;
-  const testimonials = cmsConfig?.testimonials || TESTIMONIALS;
+  const plans = cmsConfig?.pricing?.packages && cmsConfig.pricing.packages.length > 0 
+    ? cmsConfig.pricing.packages 
+    : PRICING_PLANS;
+  const testimonials = cmsConfig?.testimonials && cmsConfig.testimonials.length > 0 
+    ? cmsConfig.testimonials 
+    : TESTIMONIALS;
 
   return (
     <section id="pricing" className="relative py-24 md:py-32 bg-brand-secondary/30 overflow-hidden">

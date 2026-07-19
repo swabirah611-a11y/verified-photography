@@ -26,7 +26,7 @@ import {
 import { PORTFOLIO_ITEMS } from '../data';
 import { PortfolioItem } from '../types';
 import OptimizedImage from './OptimizedImage';
-import { getPortfolioItems } from '../lib/supabase';
+import { getExhibitions, getPortfolioItems, supabase } from '../lib/supabase';
 
 interface PortfolioSectionProps {
   onBookSession: (sessionType: string) => void;
@@ -35,19 +35,98 @@ interface PortfolioSectionProps {
 export default function PortfolioSection({ onBookSession }: PortfolioSectionProps) {
   // Dynamic portfolio items list to support admin CRUD changes
   const [activePortfolioItems, setActivePortfolioItems] = useState<PortfolioItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadItems = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const exhibitions = await getExhibitions();
+      
+      // Filter only published exhibitions
+      const published = exhibitions.filter(e => e.published);
+      
+      if (published.length > 0) {
+        // Map to PortfolioItem format
+        const mapped: PortfolioItem[] = published.map(e => ({
+          id: e.id,
+          title: e.title,
+          category: e.category,
+          location: 'Studio Capture',
+          image: e.cover_image,
+          description: e.description || '',
+          date: e.created_at ? new Date(e.created_at).getFullYear().toString() : '2026',
+          cameraSetup: 'Professional DSLR Setup'
+        }));
+        setActivePortfolioItems(mapped);
+      } else {
+        // Fallback to portfolio table if exhibition_art is empty
+        const fallbackItems = await getPortfolioItems();
+        setActivePortfolioItems(fallbackItems);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load exhibitions, attempting portfolio fallback:', err);
+      try {
+        const fallbackItems = await getPortfolioItems();
+        setActivePortfolioItems(fallbackItems);
+      } catch (fbErr: any) {
+        console.error('Portfolio fallback failed:', fbErr);
+        setError(fbErr.message || 'Error connecting to database');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadItems = async () => {
-      const items = await getPortfolioItems();
-      setActivePortfolioItems(items);
-    };
-
     loadItems();
 
-    // Listen for real-time CRUD notifications from the admin panel
+    // 1. Listen for real-time CRUD notifications from the admin panel
+    window.addEventListener('exhibitions_updated', loadItems);
     window.addEventListener('portfolio_items_updated', loadItems);
+
+    // 2. Setup BroadcastChannel for cross-tab local updates
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel('exhibitions_sync');
+      channel.onmessage = (event) => {
+        if (event.data === 'refresh') {
+          loadItems();
+        }
+      };
+    } catch (e) {
+      console.warn('BroadcastChannel not supported in this environment:', e);
+    }
+
+    // 3. Setup Supabase Realtime for cross-tab database-driven updates
+    let realtimeSubscription: any = null;
+    if (supabase) {
+      try {
+        realtimeSubscription = supabase
+          .channel('exhibition_art_changes_public')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'exhibition_art' },
+            () => {
+              loadItems();
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscription failed:', err);
+      }
+    }
+
     return () => {
+      window.removeEventListener('exhibitions_updated', loadItems);
       window.removeEventListener('portfolio_items_updated', loadItems);
+      if (channel) {
+        channel.close();
+      }
+      if (supabase && realtimeSubscription) {
+        supabase.removeChannel(realtimeSubscription);
+      }
     };
   }, []);
 
@@ -69,19 +148,28 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
   const getFilteredItems = (): PortfolioItem[] => {
     return activePortfolioItems.filter(item => {
       if (selectedCategory === 'All') return true;
-      const itemCat = item.category.toLowerCase();
-      const filterCat = selectedCategory.toLowerCase();
+      const itemCat = (item.category || '').toLowerCase().trim();
+      const filterCat = selectedCategory.toLowerCase().trim();
 
-      if (filterCat === 'wedding') return itemCat === 'weddings' || itemCat === 'wedding';
-      if (filterCat === 'portrait') return itemCat === 'portraits' || itemCat === 'portrait';
-      if (filterCat === 'graduation') return itemCat === 'graduations' || itemCat === 'graduation';
-      if (filterCat === 'birthday') {
-        // Birthday maps to high-energy Jubilee celebrations
-        return (itemCat === 'events' || itemCat === 'event') && (item.title.toLowerCase().includes('gala') || item.description.toLowerCase().includes('birthday') || item.title.toLowerCase().includes('jubilee'));
+      if (filterCat === 'wedding' || filterCat === 'weddings') {
+        return itemCat === 'weddings' || itemCat === 'wedding';
       }
-      if (filterCat === 'events') return itemCat === 'events' || itemCat === 'event';
-      if (filterCat === 'commercial') return itemCat === 'commercial';
-      return itemCat === filterCat;
+      if (filterCat === 'portrait' || filterCat === 'portraits') {
+        return itemCat === 'portraits' || itemCat === 'portrait';
+      }
+      if (filterCat === 'graduation' || filterCat === 'graduations') {
+        return itemCat === 'graduations' || itemCat === 'graduation';
+      }
+      if (filterCat === 'birthday' || filterCat === 'birthdays') {
+        return itemCat === 'birthday' || itemCat === 'birthdays' || itemCat === 'events' || itemCat === 'event' || itemCat.includes('birthday');
+      }
+      if (filterCat === 'events' || filterCat === 'event') {
+        return itemCat === 'events' || itemCat === 'event' || itemCat === 'birthday' || itemCat === 'birthdays';
+      }
+      if (filterCat === 'commercial') {
+        return itemCat === 'commercial';
+      }
+      return itemCat.includes(filterCat) || filterCat.includes(itemCat);
     });
   };
 
@@ -314,53 +402,77 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
 
         {/* 3D FLOATING GALLERY (Desktop Suspension Showcase) */}
         <div className="hidden lg:block w-full min-h-[750px] relative mt-12 mb-28">
-          <div className="absolute -top-10 left-4 text-[10px] font-mono tracking-wider text-[#2EC4B6]/60 flex items-center gap-1.5">
-            <Compass className="w-3.5 h-3.5 text-[#2EC4B6]" />
-            <span>INTERACTIVE CAMERA PARALLAX: HOVER & MOVE CURSOR ACROSS SPACE</span>
-          </div>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-32 text-center">
+              <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+                <div className="absolute inset-0 border-2 border-dashed border-[#2EC4B6]/20 rounded-full animate-spin duration-[6000ms]" />
+                <Camera className="w-5 h-5 text-[#2EC4B6] animate-pulse" />
+              </div>
+              <span className="text-xs font-mono tracking-widest text-[#A7C4B8] uppercase">Loading digital exhibitions...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-32 text-center">
+              <Camera className="w-8 h-8 text-red-400 mb-2" />
+              <span className="text-xs font-mono text-red-400 uppercase">Failed to fetch exhibition catalog</span>
+              <p className="text-xs text-[#A7C4B8] mt-2 max-w-sm mx-auto">{error}</p>
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-32 text-center border border-white/5 rounded-3xl bg-white/[0.01]">
+              <Camera className="w-12 h-12 text-[#A7C4B8]/40 mb-4" />
+              <h3 className="text-lg font-space font-bold text-white mb-2">No Curated Masterpieces</h3>
+              <p className="text-xs text-[#A7C4B8] max-w-sm mx-auto leading-relaxed">
+                The digital vault has no published pieces under this category yet.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="absolute -top-10 left-4 text-[10px] font-mono tracking-wider text-[#2EC4B6]/60 flex items-center gap-1.5">
+                <Compass className="w-3.5 h-3.5 text-[#2EC4B6]" />
+                <span>INTERACTIVE CAMERA PARALLAX: HOVER & MOVE CURSOR ACROSS SPACE</span>
+              </div>
 
-          <motion.div
-            ref={galleryContainerRef}
-            onMouseMove={handleGalleryMouseMove}
-            onMouseLeave={handleGalleryMouseLeave}
-            style={{
-              x: cameraOffset.x,
-              y: cameraOffset.y,
-            }}
-            transition={{ type: "spring", stiffness: 90, damping: 22 }}
-            className="w-full h-full relative grid grid-cols-3 gap-y-12 gap-x-8 px-6"
-          >
-            <AnimatePresence mode="popLayout">
-              {filteredItems.map((item, idx) => {
-                // Fetch pre-configured layers details to apply high-end visual physics
-                const layoutDetail = depthConfigurations[idx % depthConfigurations.length];
-                
-                return (
-                  <motion.div
-                    layout
-                    key={item.id}
-                    initial={{ opacity: 0, scale: 0.8, y: 40 }}
-                    animate={{ 
-                      opacity: 1, 
-                      scale: layoutDetail.scale, 
-                      y: 0,
-                    }}
-                    exit={{ opacity: 0, scale: 0.7, y: -40 }}
-                    transition={{ 
-                      type: "spring", 
-                      stiffness: 100, 
-                      damping: 18,
-                      delay: idx * 0.05 
-                    }}
-                    style={{
-                      zIndex: layoutDetail.zIndex,
-                    }}
-                    className="relative group cursor-pointer"
-                    onClick={() => {
-                      const absoluteIdx = filteredItems.findIndex(f => f.id === item.id);
-                      setFullscreenIdx(absoluteIdx);
-                    }}
-                  >
+              <motion.div
+                ref={galleryContainerRef}
+                onMouseMove={handleGalleryMouseMove}
+                onMouseLeave={handleGalleryMouseLeave}
+                style={{
+                  x: cameraOffset.x,
+                  y: cameraOffset.y,
+                }}
+                transition={{ type: "spring", stiffness: 90, damping: 22 }}
+                className="w-full h-full relative grid grid-cols-3 gap-y-12 gap-x-8 px-6"
+              >
+                <AnimatePresence mode="popLayout">
+                  {filteredItems.map((item, idx) => {
+                    // Fetch pre-configured layers details to apply high-end visual physics
+                    const layoutDetail = depthConfigurations[idx % depthConfigurations.length];
+                    
+                    return (
+                      <motion.div
+                        layout
+                        key={item.id}
+                        initial={{ opacity: 0, scale: 0.8, y: 40 }}
+                        animate={{ 
+                          opacity: 1, 
+                          scale: layoutDetail.scale, 
+                          y: 0,
+                        }}
+                        exit={{ opacity: 0, scale: 0.7, y: -40 }}
+                        transition={{ 
+                          type: "spring", 
+                          stiffness: 100, 
+                          damping: 18,
+                          delay: idx * 0.05 
+                        }}
+                        style={{
+                          zIndex: layoutDetail.zIndex,
+                        }}
+                        className="relative group cursor-pointer"
+                        onClick={() => {
+                          const absoluteIdx = filteredItems.findIndex(f => f.id === item.id);
+                          setFullscreenIdx(absoluteIdx);
+                        }}
+                      >
                     {/* Independent floating wrapper */}
                     <motion.div
                       animate={{
@@ -450,11 +562,26 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
               </p>
             </div>
           )}
+          </>)}
         </div>
 
         {/* MOBILE & TABLET CAROUSEL (Touch Optimized Swiper) */}
         <div className="lg:hidden w-full mb-20 relative px-1">
-          {filteredItems.length > 0 ? (
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="relative w-10 h-10 flex items-center justify-center mb-3">
+                <div className="absolute inset-0 border border-dashed border-[#2EC4B6]/20 rounded-full animate-spin duration-[6000ms]" />
+                <Camera className="w-4 h-4 text-[#2EC4B6] animate-pulse" />
+              </div>
+              <span className="text-[10px] font-mono tracking-widest text-[#A7C4B8] uppercase">Loading digital exhibitions...</span>
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Camera className="w-6 h-6 text-red-400 mb-2" />
+              <span className="text-[10px] font-mono text-red-400 uppercase">Failed to fetch catalog</span>
+              <p className="text-[10px] text-[#A7C4B8] mt-1 max-w-sm mx-auto">{error}</p>
+            </div>
+          ) : filteredItems.length > 0 ? (
             <div className="overflow-hidden relative rounded-3xl backdrop-blur-md border border-white/5 bg-white/[0.01] p-5">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-1.5">

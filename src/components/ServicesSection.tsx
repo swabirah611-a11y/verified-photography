@@ -42,7 +42,7 @@ interface ServiceItem {
 
 export default function ServicesSection({ onBookService, cmsConfig }: ServicesSectionProps) {
   // Service list dynamically loaded from CMS or following specification exactly
-  const services: ServiceItem[] = (cmsConfig?.services || [
+  const services: ServiceItem[] = (cmsConfig?.services && cmsConfig.services.length > 0 ? cmsConfig.services : [
     {
       id: 'ser-1',
       title: 'Wedding Photography',

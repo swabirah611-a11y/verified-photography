@@ -99,25 +99,9 @@ function parseNotesFromNotes(notes: string): string {
  * Attempts to insert into Supabase if configured, otherwise logs to local storage.
  */
 export async function saveBooking(booking: Booking): Promise<{ success: boolean; error?: string }> {
-  // Always log locally to ensure consistency
-  const localBookings = JSON.parse(localStorage.getItem('verified_photography_bookings') || '[]');
-  
-  // Check for duplicate submission (same name, date, and category)
-  const isDuplicate = localBookings.some((b: Booking) => 
-    b.name.trim().toLowerCase() === booking.name.trim().toLowerCase() && 
-    b.date === booking.date && 
-    b.category.trim().toLowerCase() === booking.category.trim().toLowerCase()
-  );
-
-  if (isDuplicate) {
-    return { success: false, error: 'A booking for this name, date, and category has already been submitted.' };
-  }
-
-  localBookings.unshift(booking);
-  localStorage.setItem('verified_photography_bookings', JSON.stringify(localBookings));
-
   if (supabase) {
     try {
+      // Direct insert into Supabase
       const { error } = await supabase
         .from('bookings')
         .insert([{
@@ -136,11 +120,12 @@ export async function saveBooking(booking: Booking): Promise<{ success: boolean;
         }]);
 
       if (error) {
-        console.warn('Supabase insert failed, using localStorage fallback:', error.message);
-        // Do not fail the call since it was written to localStorage
+        console.warn('Supabase insert failed:', error.message);
+        return { success: false, error: error.message };
       }
     } catch (err: any) {
-      console.warn('Supabase communication error, using localStorage fallback:', err.message);
+      console.warn('Supabase communication error:', err.message);
+      return { success: false, error: err.message };
     }
   }
 
@@ -151,11 +136,9 @@ export async function saveBooking(booking: Booking): Promise<{ success: boolean;
 
 /**
  * Retrieves all bookings.
- * Attempts to fetch from Supabase if configured, falling back to localStorage.
+ * Attempts to fetch from Supabase if configured.
  */
 export async function getBookings(): Promise<Booking[]> {
-  const localBookings = JSON.parse(localStorage.getItem('verified_photography_bookings') || '[]');
-
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -164,8 +147,8 @@ export async function getBookings(): Promise<Booking[]> {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('Supabase fetch failed, returning localStorage cache:', error.message);
-        return localBookings;
+        console.warn('Supabase fetch failed:', error.message);
+        return [];
       }
 
       if (data && data.length > 0) {
@@ -186,25 +169,20 @@ export async function getBookings(): Promise<Booking[]> {
           timestamp: b.created_at || b.timestamp || ''
         }));
 
-        localStorage.setItem('verified_photography_bookings', JSON.stringify(mapped));
         return mapped;
       }
     } catch (err: any) {
-      console.warn('Supabase fetch connection error, returning localStorage cache:', err.message);
+      console.warn('Supabase fetch connection error:', err.message);
     }
   }
 
-  return localBookings;
+  return [];
 }
 
 /**
  * Deletes a booking by ID.
  */
 export async function deleteBooking(id: string): Promise<void> {
-  const localBookings = JSON.parse(localStorage.getItem('verified_photography_bookings') || '[]');
-  const filtered = localBookings.filter((b: Booking) => b.id !== id);
-  localStorage.setItem('verified_photography_bookings', JSON.stringify(filtered));
-
   if (supabase) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -385,6 +363,7 @@ export interface CmsConfig {
     stats: Array<{ label: string; value: number; suffix: string }>;
     timeline: Array<{ title: string; desc: string }>;
     features: Array<{ title: string; desc: string; iconName: string }>;
+    galleryFrames?: Array<{ title: string; image: string; fallbackImage: string; xOffset: number; yOffset: number; rotate: number; depth: number; borderColor: string; zIndex: number }>;
   };
   services: Array<{
     id: string;
@@ -820,99 +799,486 @@ function mapCmsConfigToDb(config: CmsConfig): any {
   };
 }
 
+export async function getHeroCanvas(): Promise<any> {
+  const emptyHero = {
+    businessName: '',
+    mainHeading: '',
+    subheading: '',
+    description: '',
+    bgImage: '',
+    videoUrl: '',
+    ctaText: '',
+    ctaLink: '',
+    secondaryCtaText: '',
+    secondaryCtaLink: '',
+    locations: []
+  };
+  if (!supabase) return emptyHero;
+  try {
+    const { data, error } = await supabase.from('hero_canvas').select('*').limit(1).maybeSingle();
+    if (data) {
+      const anims = data.animations || {};
+      return {
+        businessName: anims.businessName || '',
+        mainHeading: data.hero_title || '',
+        subheading: data.hero_subtitle || '',
+        description: data.call_to_action || '',
+        bgImage: data.background_image || '',
+        videoUrl: data.background_video || '',
+        ctaText: data.primary_button?.text || '',
+        ctaLink: data.primary_button?.link || '',
+        secondaryCtaText: data.secondary_button?.text || '',
+        secondaryCtaLink: data.secondary_button?.link || '',
+        locations: anims.locations || []
+      };
+    }
+  } catch (err) {
+    console.warn('getHeroCanvas failed:', err);
+  }
+  return emptyHero;
+}
+
+export async function getAboutVision(): Promise<any> {
+  const emptyAbout = {
+    title: '',
+    heading: '',
+    headingHighlight: '',
+    description: '',
+    experienceYears: 0,
+    founderName: '',
+    founderRole: '',
+    founderPhoto: '',
+    founderQuote: '',
+    stats: [],
+    timeline: [],
+    features: [],
+    galleryFrames: []
+  };
+
+  if (!supabase) return emptyAbout;
+  try {
+    const { data, error } = await supabase.from('about_vision').select('*').limit(1).maybeSingle();
+    if (data) {
+      let title = '';
+      let heading = '';
+      let headingHighlight = '';
+      try {
+        if (data.mission) {
+          const m = typeof data.mission === 'string' ? JSON.parse(data.mission) : data.mission;
+          title = m.title || '';
+          heading = m.heading || '';
+          headingHighlight = m.headingHighlight || '';
+        }
+      } catch {}
+
+      let founderName = '';
+      let founderRole = '';
+      let founderQuote = '';
+      try {
+        if (data.vision) {
+          const v = typeof data.vision === 'string' ? JSON.parse(data.vision) : data.vision;
+          founderName = v.founderName || '';
+          founderRole = v.founderRole || '';
+          founderQuote = v.founderQuote || '';
+        }
+      } catch {}
+
+      let stats = [];
+      try {
+        if (data.achievements && data.achievements.length > 0) {
+          stats = data.achievements.map((itemStr: any) => {
+            return typeof itemStr === 'string' ? JSON.parse(itemStr) : itemStr;
+          });
+        }
+      } catch {}
+
+      let timeline = [];
+      let features = [];
+      let galleryFrames = [];
+      try {
+        if (data.studio_images && data.studio_images.length > 0) {
+          const extra = typeof data.studio_images[0] === 'string' ? JSON.parse(data.studio_images[0]) : data.studio_images[0];
+          timeline = extra.timeline || [];
+          features = extra.features || [];
+          galleryFrames = extra.galleryFrames || [];
+        }
+      } catch {}
+
+      return {
+        title,
+        heading,
+        headingHighlight,
+        description: data.biography || '',
+        experienceYears: data.experience || 0,
+        founderName,
+        founderRole,
+        founderPhoto: data.profile_image || '',
+        founderQuote,
+        stats,
+        timeline,
+        features,
+        galleryFrames
+      };
+    }
+  } catch (err) {
+    console.warn('getAboutVision failed:', err);
+  }
+  return emptyAbout;
+}
+
+export async function getServicesOffered(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('services_offered')
+      .select('*')
+      .order('display_order', { ascending: true });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => {
+        let features: string[] = [];
+        let cover_image = item.cover_image || '';
+        try {
+          if (cover_image.startsWith('{')) {
+            const parsed = JSON.parse(cover_image);
+            cover_image = parsed.image || '';
+            features = parsed.features || [];
+          }
+        } catch {}
+
+        return {
+          id: item.id,
+          title: item.service_name || '',
+          iconName: item.icon || 'Camera',
+          description: item.description || '',
+          pricingRange: `From ₦${Number(item.pricing || 0).toLocaleString()}`,
+          features: features.length > 0 ? features : []
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('getServicesOffered failed:', err);
+  }
+  return [];
+}
+
+export async function getPricingPackages(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('pricing_packages')
+      .select('*')
+      .order('display_order', { ascending: true });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        id: item.id,
+        name: item.package_name || '',
+        price: `₦${Number(item.price || 0).toLocaleString()}`,
+        duration: item.duration || '',
+        description: item.description || '',
+        features: item.features || [],
+        popular: !!item.popular,
+        category: 'Portraits & Weddings'
+      }));
+    }
+  } catch (err) {
+    console.warn('getPricingPackages failed:', err);
+  }
+  return [];
+}
+
+export async function getFaqModules(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('faq_modules')
+      .select('*')
+      .eq('active', true)
+      .order('display_order', { ascending: true });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        id: item.id,
+        question: item.question || '',
+        answer: item.answer || '',
+        order: item.display_order || 0
+      }));
+    }
+  } catch (err) {
+    console.warn('getFaqModules failed:', err);
+  }
+  return [];
+}
+
+export async function getStudioTeam(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('studio_team')
+      .select('*')
+      .order('display_order', { ascending: true });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        id: item.id,
+        name: item.full_name || '',
+        role: item.role || '',
+        photo: item.profile_photo || '',
+        bio: item.biography || '',
+        socialLinks: item.social_links || {}
+      }));
+    }
+  } catch (err) {
+    console.warn('getStudioTeam failed:', err);
+  }
+  return [];
+}
+
+export async function getEditorialBlogs(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('editorial_blogs')
+      .select('*')
+      .order('published_at', { ascending: false });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        id: item.id,
+        title: item.title || '',
+        content: item.content || '',
+        category: item.category || '',
+        tags: item.tags || [],
+        featuredImage: item.featured_image || '',
+        date: (item.published_at || item.created_at || '').split('T')[0] || '',
+        author: item.author || '',
+        seoTitle: item.seo_title || '',
+        seoDescription: item.seo_description || ''
+      }));
+    }
+  } catch (err) {
+    console.warn('getEditorialBlogs failed:', err);
+  }
+  return [];
+}
+
+export async function getTestimonials(): Promise<any[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('testimonials')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (data && data.length > 0) {
+      return data.map((item: any) => ({
+        id: item.id,
+        name: item.name || '',
+        role: item.role || '',
+        location: '',
+        quote: item.content || '',
+        rating: item.rating || 5,
+        approved: true,
+        featured: true
+      }));
+    }
+  } catch (err) {
+    console.warn('getTestimonials failed:', err);
+  }
+  return [];
+}
+
+export async function getNavSocials(): Promise<any> {
+  const emptyNav = {
+    logoText: '',
+    logoSubtext: '',
+    socialLinks: {
+      instagram: '',
+      facebook: '',
+      twitter: '',
+      whatsapp: ''
+    },
+    phone: '',
+    email: ''
+  };
+  if (!supabase) return emptyNav;
+  try {
+    const { data, error } = await supabase.from('nav_socials').select('*').limit(1).maybeSingle();
+    if (data) {
+      const parts = (data.logo || '').split('|');
+      return {
+        logoText: parts[0] || '',
+        logoSubtext: parts[1] || '',
+        socialLinks: {
+          instagram: data.instagram || '',
+          facebook: data.facebook || '',
+          twitter: data.x || '',
+          whatsapp: data.whatsapp || ''
+        },
+        phone: data.phone || '',
+        email: data.email || ''
+      };
+    }
+  } catch (err) {
+    console.warn('getNavSocials failed:', err);
+  }
+  return emptyNav;
+}
+
 /**
  * Retrieves the unified CMS configuration, checking Supabase first and falling back to localStorage and default.
  */
 export async function getCmsConfig(): Promise<CmsConfig> {
-  const localConfig = localStorage.getItem('verified_cms_config');
-  let config = DEFAULT_CMS_CONFIG;
-  if (localConfig) {
-    try {
-      config = JSON.parse(localConfig);
-    } catch {}
-  } else {
-    localStorage.setItem('verified_cms_config', JSON.stringify(DEFAULT_CMS_CONFIG));
-  }
+  const emptyConfig: CmsConfig = {
+    hero: {
+      businessName: '',
+      mainHeading: '',
+      subheading: '',
+      description: '',
+      bgImage: '',
+      videoUrl: '',
+      ctaText: '',
+      ctaLink: '',
+      secondaryCtaText: '',
+      secondaryCtaLink: '',
+      locations: []
+    },
+    navigation: {
+      logoText: '',
+      logoSubtext: '',
+      sticky: true,
+      socialLinks: {
+        instagram: '',
+        facebook: '',
+        twitter: '',
+        whatsapp: ''
+      }
+    },
+    about: {
+      title: '',
+      heading: '',
+      headingHighlight: '',
+      description: '',
+      founderName: '',
+      founderRole: '',
+      founderPhoto: '',
+      founderQuote: '',
+      experienceYears: 0,
+      stats: [],
+      timeline: [],
+      features: [],
+      galleryFrames: []
+    },
+    services: [],
+    pricing: {
+      packages: []
+    },
+    faq: [],
+    team: [],
+    blogs: [],
+    testimonials: [],
+    footer: {
+      logoText: '',
+      phone: '',
+      email: '',
+      aboutText: '',
+      address: '',
+      copyright: ''
+    },
+    theme: {
+      primaryColor: '#2EC4B6',
+      secondaryColor: '#FF9F1C',
+      accentColor: '#E71D36',
+      backgroundColor: '#011627',
+      textColor: '#FDFFFC',
+      borderRadius: '8px',
+      glassEffect: true,
+      cursorEffect: false,
+      pageTransitions: true,
+      floatingEffects: true
+    },
+    seo: {
+      title: '',
+      description: '',
+      keywords: '',
+      ogImage: ''
+    },
+    advanced: {
+      maintenanceMode: false,
+      googleAnalyticsId: '',
+      emailNotifications: '',
+      whatsappPhone: ''
+    }
+  };
 
   if (supabase) {
     try {
-      // 1. Fetch from website_settings table (stores entire CmsConfig JSON)
-      const { data: wsData, error: wsError } = await supabase
-        .from('website_settings')
-        .select('id, settings')
-        .limit(1)
-        .maybeSingle();
+      const [
+        hero,
+        about,
+        services,
+        pricingPackages,
+        faqs,
+        team,
+        blogs,
+        testimonials,
+        navSocials
+      ] = await Promise.all([
+        getHeroCanvas(),
+        getAboutVision(),
+        getServicesOffered(),
+        getPricingPackages(),
+        getFaqModules(),
+        getStudioTeam(),
+        getEditorialBlogs(),
+        getTestimonials(),
+        getNavSocials()
+      ]);
 
-      if (!wsError && wsData && wsData.settings) {
-        localStorage.setItem('verified_website_settings_row_id', wsData.id);
-        const parsedSettings = typeof wsData.settings === 'string'
-          ? JSON.parse(wsData.settings)
-          : wsData.settings;
+      const composedConfig: CmsConfig = {
+        hero: hero || emptyConfig.hero,
+        about: about || emptyConfig.about,
+        services: services || [],
+        pricing: {
+          packages: pricingPackages || []
+        },
+        faq: faqs || [],
+        team: team || [],
+        blogs: blogs || [],
+        testimonials: testimonials || [],
+        navigation: {
+          logoText: navSocials?.logoText || '',
+          logoSubtext: navSocials?.logoSubtext || '',
+          sticky: true,
+          socialLinks: navSocials?.socialLinks || emptyConfig.navigation.socialLinks
+        },
+        footer: {
+          logoText: navSocials?.logoText || '',
+          phone: navSocials?.phone || '',
+          email: navSocials?.email || '',
+          aboutText: about?.description || '',
+          address: '',
+          copyright: navSocials?.logoText ? `© ${new Date().getFullYear()} ${navSocials.logoText.toUpperCase()}. All rights reserved.` : ''
+        },
+        theme: emptyConfig.theme,
+        seo: emptyConfig.seo,
+        advanced: emptyConfig.advanced
+      };
 
-        const mergedConfig = {
-          ...DEFAULT_CMS_CONFIG,
-          ...parsedSettings,
-          theme: { ...DEFAULT_CMS_CONFIG.theme, ...(parsedSettings.theme || {}) },
-          hero: { ...DEFAULT_CMS_CONFIG.hero, ...(parsedSettings.hero || {}) },
-          navigation: { ...DEFAULT_CMS_CONFIG.navigation, ...(parsedSettings.navigation || {}) },
-          about: { ...DEFAULT_CMS_CONFIG.about, ...(parsedSettings.about || {}) },
-          footer: { ...DEFAULT_CMS_CONFIG.footer, ...(parsedSettings.footer || {}) },
-          seo: { ...DEFAULT_CMS_CONFIG.seo, ...(parsedSettings.seo || {}) },
-          advanced: { ...DEFAULT_CMS_CONFIG.advanced, ...(parsedSettings.advanced || {}) }
-        };
-
-        localStorage.setItem('verified_cms_config', JSON.stringify(mergedConfig));
-        return mergedConfig as CmsConfig;
-      } else if (!wsData && !wsError) {
-        await supabase
-          .from('website_settings')
-          .insert([{ settings: config }]);
-      }
+      return composedConfig;
     } catch (err: any) {
-      console.warn('website_settings fetch failed, falling back:', err.message);
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('cms_config')
-        .select('id, site_name, logo, favicon, primary_color, secondary_color, accent_color, hero_title, hero_subtitle, about_text, footer_text, contact_email, phone, whatsapp, address, maintenance_mode')
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.warn('Supabase cms_config fetch notice:', error.message);
-      } else if (data) {
-        localStorage.setItem('verified_cms_config_row_id', data.id);
-        const mappedConfig = mapDbToCmsConfig(data, config);
-        localStorage.setItem('verified_cms_config', JSON.stringify(mappedConfig));
-        return mappedConfig;
-      } else {
-        console.log('Inserting default cms_config row (auto UUID)...');
-        const dbRow = mapCmsConfigToDb(config);
-        const { data: insertData, error: insertError } = await supabase
-          .from('cms_config')
-          .insert([dbRow])
-          .select('id')
-          .single();
-        if (!insertError && insertData) {
-          localStorage.setItem('verified_cms_config_row_id', insertData.id);
-        } else if (insertError) {
-          console.warn('Fallback: cms_config insert failed:', insertError.message);
-        }
-      }
-    } catch (err: any) {
-      console.warn('Supabase cms_config exception:', err.message);
+      console.warn('Composing cms_config from tables failed, returning empty:', err.message);
     }
   }
 
-  return config;
+  return emptyConfig;
 }
 
 /**
- * Saves the unified CMS configuration, uploading to Supabase if configured, otherwise saving to localStorage.
+ * Saves the unified CMS configuration, uploading to Supabase if configured.
  */
 export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
-  localStorage.setItem('verified_cms_config', JSON.stringify(config));
   window.dispatchEvent(new Event('cms_config_updated'));
 
   if (supabase) {
@@ -952,69 +1318,193 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
           localStorage.setItem('verified_website_settings_row_id', wsInserted.id);
         }
       }
-    } catch (err: any) {
-      console.warn('website_settings save failed, continuing to legacy cms_config:', err.message);
-    }
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.warn('Unauthorized: Session required for saving configuration.');
-        return false;
-      }
-
+      // 2. Save to cms_config table
       let rowId = localStorage.getItem('verified_cms_config_row_id');
-
       if (!rowId) {
         const { data: existing, error: fetchErr } = await supabase
           .from('cms_config')
           .select('id')
           .limit(1)
           .maybeSingle();
-
         if (!fetchErr && existing) {
           rowId = existing.id;
           localStorage.setItem('verified_cms_config_row_id', existing.id);
         }
       }
-
       const dbRow = mapCmsConfigToDb(config);
-
       if (rowId) {
-        const { error: updateError } = await supabase
-          .from('cms_config')
-          .update(dbRow)
-          .eq('id', rowId);
-
-        if (updateError) {
-          console.warn('Supabase cms_config update failed, attempting insert fallback:', updateError.message);
-          const { data: insertData, error: insertError } = await supabase
-            .from('cms_config')
-            .insert([dbRow])
-            .select('id')
-            .single();
-          if (!insertError && insertData) {
-            localStorage.setItem('verified_cms_config_row_id', insertData.id);
-          }
-        }
+        await supabase.from('cms_config').update(dbRow).eq('id', rowId);
       } else {
-        console.log('Inserting brand new cms_config row during save...');
         const { data: insertData, error: insertError } = await supabase
           .from('cms_config')
           .insert([dbRow])
           .select('id')
           .single();
-
-        if (insertError) {
-          console.warn('Supabase cms_config insert failed:', insertError.message);
-          return false;
-        } else if (insertData) {
+        if (!insertError && insertData) {
           localStorage.setItem('verified_cms_config_row_id', insertData.id);
         }
       }
+
+      // 3. Save to individual tables
+      const heroRow = {
+        hero_title: config.hero?.mainHeading || '',
+        hero_subtitle: config.hero?.subheading || '',
+        background_image: config.hero?.bgImage || '',
+        background_video: config.hero?.videoUrl || '',
+        call_to_action: config.hero?.description || '',
+        primary_button: { text: config.hero?.ctaText || 'Book a Session', link: config.hero?.ctaLink || 'contact' },
+        secondary_button: { text: config.hero?.secondaryCtaText || 'Explore Portfolio', link: config.hero?.secondaryCtaLink || 'portfolio' },
+        animations: { entrance: "fade-up", speed: "slow", businessName: config.hero?.businessName, locations: config.hero?.locations }
+      };
+      const { data: heroExist } = await supabase.from('hero_canvas').select('id').limit(1).maybeSingle();
+      if (heroExist) {
+        await supabase.from('hero_canvas').update(heroRow).eq('id', heroExist.id);
+      } else {
+        await supabase.from('hero_canvas').insert([heroRow]);
+      }
+
+      const defaultGalleryFrames = [
+        { title: 'Wedding Photography', image: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg', fallbackImage: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=800', xOffset: -120, yOffset: -100, rotate: -8, depth: 1.4, borderColor: 'border-[#2EC4B6]/20 hover:border-[#2EC4B6]/80', zIndex: 10 },
+        { title: 'Portrait Photography', image: '/src/assets/images/fashion_editorial_auchi_1784211215673.jpg', fallbackImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800', xOffset: 140, yOffset: -140, rotate: 10, depth: 0.9, borderColor: 'border-[#34D399]/20 hover:border-[#34D399]/80', zIndex: 5 },
+        { title: 'Graduation Photography', image: '/src/assets/images/graduation_portrait_ekpoma_1784211201712.jpg', fallbackImage: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=800', xOffset: -150, yOffset: 110, rotate: 6, depth: 1.8, borderColor: 'border-[#6EE7B7]/20 hover:border-[#6EE7B7]/80', zIndex: 12 },
+        { title: 'Birthday Photography', image: '/src/assets/images/event_celebration_uromi_1784211232313.jpg', fallbackImage: 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=80&w=800', xOffset: 150, yOffset: 90, rotate: -6, depth: 1.2, borderColor: 'border-[#10B981]/20 hover:border-[#10B981]/80', zIndex: 15 },
+        { title: 'Event Photography', image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800', fallbackImage: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800', xOffset: 0, yOffset: -20, rotate: 2, depth: 2.2, borderColor: 'border-[#2EC4B6]/30 hover:border-[#2EC4B6]/90', zIndex: 8 },
+        { title: 'Commercial Photography', image: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800', fallbackImage: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800', xOffset: 10, yOffset: 180, rotate: -4, depth: 0.6, borderColor: 'border-[#059669]/20 hover:border-[#059669]/80', zIndex: 6 }
+      ];
+      const aboutRow = {
+        biography: config.about?.description || '',
+        experience: config.about?.experienceYears || 5,
+        profile_image: config.about?.founderPhoto || '',
+        mission: JSON.stringify({ title: config.about?.title, heading: config.about?.heading, headingHighlight: config.about?.headingHighlight }),
+        vision: JSON.stringify({ founderName: config.about?.founderName, founderRole: config.about?.founderRole, founderQuote: config.about?.founderQuote }),
+        achievements: (config.about?.stats || []).map(s => JSON.stringify(s)),
+        studio_images: [JSON.stringify({ timeline: config.about?.timeline, features: config.about?.features, galleryFrames: config.about?.galleryFrames || defaultGalleryFrames })]
+      };
+      const { data: aboutExist } = await supabase.from('about_vision').select('id').limit(1).maybeSingle();
+      if (aboutExist) {
+        await supabase.from('about_vision').update(aboutRow).eq('id', aboutExist.id);
+      } else {
+        await supabase.from('about_vision').insert([aboutRow]);
+      }
+
+      const navRow = {
+        logo: `${config.navigation?.logoText || 'VERIFIED'}|${config.navigation?.logoSubtext || 'PHOTOGRAPHY'}`,
+        whatsapp: config.navigation?.socialLinks?.whatsapp || '',
+        phone: config.footer?.phone || '',
+        email: config.footer?.email || '',
+        instagram: config.navigation?.socialLinks?.instagram || '',
+        facebook: config.navigation?.socialLinks?.facebook || '',
+        x: config.navigation?.socialLinks?.twitter || ''
+      };
+      const { data: navExist } = await supabase.from('nav_socials').select('id').limit(1).maybeSingle();
+      if (navExist) {
+        await supabase.from('nav_socials').update(navRow).eq('id', navExist.id);
+      } else {
+        await supabase.from('nav_socials').insert([navRow]);
+      }
+
+      await supabase.from('services_offered').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const serviceRows = (config.services || []).map((s, idx) => {
+        const priceNum = Number((s.pricingRange || '').replace(/[^0-9]/g, '')) || 50000;
+        return {
+          service_name: s.title,
+          description: s.description,
+          icon: s.iconName,
+          cover_image: JSON.stringify({ image: '', features: s.features }),
+          pricing: priceNum,
+          display_order: idx,
+          featured: true
+        };
+      });
+      if (serviceRows.length > 0) {
+        await supabase.from('services_offered').insert(serviceRows);
+      }
+
+      await supabase.from('pricing_packages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const pricingRows = (config.pricing?.packages || []).map((p, idx) => {
+        const priceNum = Number((p.price || '').replace(/[^0-9]/g, '')) || 45000;
+        return {
+          package_name: p.name,
+          description: p.description,
+          features: p.features,
+          price: priceNum,
+          duration: p.duration,
+          popular: !!p.popular,
+          display_order: idx
+        };
+      });
+      if (pricingRows.length > 0) {
+        await supabase.from('pricing_packages').insert(pricingRows);
+      }
+
+      await supabase.from('faq_modules').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const faqRows = (config.faq || []).map((f, idx) => ({
+        question: f.question,
+        answer: f.answer,
+        category: 'general',
+        display_order: f.order || idx,
+        active: true
+      }));
+      if (faqRows.length > 0) {
+        await supabase.from('faq_modules').insert(faqRows);
+      }
+
+      await supabase.from('studio_team').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const teamRows = (config.team || []).map((t, idx) => ({
+        full_name: t.name,
+        role: t.role,
+        biography: t.bio,
+        profile_photo: t.photo,
+        social_links: t.socialLinks || { instagram: '#' },
+        display_order: idx
+      }));
+      if (teamRows.length > 0) {
+        await supabase.from('studio_team').insert(teamRows);
+      }
+
+      await supabase.from('editorial_blogs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const blogRows = (config.blogs || []).map(b => ({
+        title: b.title,
+        slug: b.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        excerpt: b.content.slice(0, 100),
+        content: b.content,
+        featured_image: b.featuredImage,
+        author: b.author,
+        category: b.category,
+        tags: b.tags,
+        read_time: 5,
+        seo_title: b.seoTitle,
+        seo_description: b.seoDescription
+      }));
+      if (blogRows.length > 0) {
+        await supabase.from('editorial_blogs').insert(blogRows);
+      }
+
+      await supabase.from('testimonials').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const testimonialRows = (config.testimonials || []).map(t => ({
+        name: t.name,
+        role: t.role,
+        content: t.quote,
+        rating: t.rating
+      }));
+      if (testimonialRows.length > 0) {
+        await supabase.from('testimonials').insert(testimonialRows);
+      }
+
+      window.dispatchEvent(new Event('hero_updated'));
+      window.dispatchEvent(new Event('about_updated'));
+      window.dispatchEvent(new Event('services_updated'));
+      window.dispatchEvent(new Event('pricing_updated'));
+      window.dispatchEvent(new Event('faq_updated'));
+      window.dispatchEvent(new Event('team_updated'));
+      window.dispatchEvent(new Event('blogs_updated'));
+      window.dispatchEvent(new Event('testimonials_updated'));
+      window.dispatchEvent(new Event('navigation_updated'));
+
       return true;
     } catch (err: any) {
-      console.warn('Supabase cms_config exception during save:', err.message);
+      console.warn('Supabase individual tables update exception:', err.message);
       return false;
     }
   }
@@ -1027,8 +1517,6 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
 import { PortfolioItem } from '../types';
 
 export async function getPortfolioItems(): Promise<PortfolioItem[]> {
-  const localPortfolio = JSON.parse(localStorage.getItem('verified_portfolio_items') || '[]');
-
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -1037,8 +1525,8 @@ export async function getPortfolioItems(): Promise<PortfolioItem[]> {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('Supabase portfolio fetch failed, returning cache:', error.message);
-        return localPortfolio;
+        console.warn('Supabase portfolio fetch failed:', error.message);
+        return [];
       }
 
       if (data) {
@@ -1052,28 +1540,16 @@ export async function getPortfolioItems(): Promise<PortfolioItem[]> {
           date: item.year || '2026',
           cameraSetup: item.camera_setup || 'Sony Custom G-Master'
         }));
-
-        localStorage.setItem('verified_portfolio_items', JSON.stringify(mapped));
         return mapped;
       }
     } catch (err: any) {
-      console.warn('Supabase connection error fetching portfolio, returning cache:', err.message);
+      console.warn('Supabase connection error fetching portfolio:', err.message);
     }
   }
-
-  return localPortfolio;
+  return [];
 }
 
 export async function savePortfolioItem(item: PortfolioItem): Promise<boolean> {
-  // Update local cache
-  const localPortfolio = JSON.parse(localStorage.getItem('verified_portfolio_items') || '[]');
-  const index = localPortfolio.findIndex((p: any) => p.id === item.id);
-  if (index >= 0) {
-    localPortfolio[index] = item;
-  } else {
-    localPortfolio.unshift(item);
-  }
-  localStorage.setItem('verified_portfolio_items', JSON.stringify(localPortfolio));
   window.dispatchEvent(new Event('portfolio_items_updated'));
 
   if (supabase) {
@@ -1109,19 +1585,17 @@ export async function savePortfolioItem(item: PortfolioItem): Promise<boolean> {
           return false;
         }
       }
+
       return true;
     } catch (err: any) {
       console.error('Supabase portfolio save exception:', err.message);
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 export async function deletePortfolioItem(id: string): Promise<boolean> {
-  const localPortfolio = JSON.parse(localStorage.getItem('verified_portfolio_items') || '[]');
-  const filtered = localPortfolio.filter((p: any) => p.id !== id);
-  localStorage.setItem('verified_portfolio_items', JSON.stringify(filtered));
   window.dispatchEvent(new Event('portfolio_items_updated'));
 
   if (supabase) {
@@ -1146,7 +1620,7 @@ export async function deletePortfolioItem(id: string): Promise<boolean> {
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 /**
@@ -1169,8 +1643,6 @@ export interface Exhibition {
 }
 
 export async function getExhibitions(): Promise<Exhibition[]> {
-  const localExhibitions = JSON.parse(localStorage.getItem('verified_exhibitions') || '[]');
-
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -1181,7 +1653,7 @@ export async function getExhibitions(): Promise<Exhibition[]> {
 
       if (error) {
         console.warn('Supabase exhibition_art fetch failed:', error.message);
-        return localExhibitions;
+        return [];
       }
 
       if (data) {
@@ -1200,34 +1672,28 @@ export async function getExhibitions(): Promise<Exhibition[]> {
           created_at: item.created_at,
           updated_at: item.updated_at
         }));
-
-        localStorage.setItem('verified_exhibitions', JSON.stringify(mapped));
         return mapped;
       }
     } catch (err: any) {
-      console.warn('Supabase connection error fetching exhibitions, returning cache:', err.message);
+      console.warn('Supabase connection error fetching exhibitions:', err.message);
     }
   }
-
-  return localExhibitions;
+  return [];
 }
 
+export let lastExhibitionError: string | null = null;
+
 export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
-  const localExhibitions = JSON.parse(localStorage.getItem('verified_exhibitions') || '[]');
-  const index = localExhibitions.findIndex((e: any) => e.id === exhibition.id);
-  if (index >= 0) {
-    localExhibitions[index] = exhibition;
-  } else {
-    localExhibitions.unshift(exhibition);
-  }
-  localStorage.setItem('verified_exhibitions', JSON.stringify(localExhibitions));
   window.dispatchEvent(new Event('exhibitions_updated'));
+  lastExhibitionError = null;
 
   if (supabase) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        console.warn('Unauthorized: Session required for exhibitions writes.');
+        const errorMsg = 'Unauthorized: Session required for exhibitions writes.';
+        console.warn(errorMsg);
+        lastExhibitionError = errorMsg;
         return false;
       }
 
@@ -1246,32 +1712,55 @@ export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
         display_order: exhibition.display_order || 0
       };
 
+      const payload = dbRow;
+
       if (isNew) {
-        const { error } = await supabase.from('exhibition_art').insert([dbRow]);
+        const { data, error } = await supabase.from('exhibition_art').insert([dbRow]).select();
         if (error) {
-          console.error('Supabase exhibition insert failed:', error.message);
+          console.error("Exhibition insert failed", {
+            message: error?.message,
+            code: error?.code,
+            details: error?.details,
+            hint: error?.hint,
+            payload
+          });
+          lastExhibitionError = `Database insert failed [${error.code || 'UNKNOWN'}]: ${error.message}`;
           return false;
         }
+        console.log("Successfully inserted exhibition_art record:", data);
       } else {
-        const { error } = await supabase.from('exhibition_art').update(dbRow).eq('id', exhibition.id);
+        const { data, error } = await supabase.from('exhibition_art').update(dbRow).eq('id', exhibition.id).select();
         if (error) {
-          console.error('Supabase exhibition update failed:', error.message);
+          console.error("Exhibition update failed", {
+            message: error?.message,
+            code: error?.code,
+            details: error?.details,
+            hint: error?.hint,
+            payload
+          });
+          lastExhibitionError = `Database update failed [${error.code || 'UNKNOWN'}]: ${error.message}`;
           return false;
         }
+        console.log("Successfully updated exhibition_art record:", data);
       }
+
+      // Sync via BroadcastChannel
+      try {
+        const channel = new BroadcastChannel('exhibitions_sync');
+        channel.postMessage('refresh');
+        channel.close();
+      } catch (e) {}
+
       return true;
     } catch (err: any) {
       console.error('Supabase exhibition save exception:', err.message);
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 export async function deleteExhibition(id: string): Promise<boolean> {
-  const localExhibitions = JSON.parse(localStorage.getItem('verified_exhibitions') || '[]');
-  const filtered = localExhibitions.filter((e: any) => e.id !== id);
-  localStorage.setItem('verified_exhibitions', JSON.stringify(filtered));
   window.dispatchEvent(new Event('exhibitions_updated'));
 
   if (supabase) {
@@ -1290,11 +1779,64 @@ export async function deleteExhibition(id: string): Promise<boolean> {
           return false;
         }
       }
+
+      // Sync via BroadcastChannel
+      try {
+        const channel = new BroadcastChannel('exhibitions_sync');
+        channel.postMessage('refresh');
+        channel.close();
+      } catch (e) {}
+
       return true;
     } catch (err: any) {
       console.error('Supabase exhibition delete exception:', err.message);
       return false;
     }
   }
-  return true;
+  return false;
 }
+
+export async function deleteOrphanFile(url: string): Promise<boolean> {
+  if (!supabase || !url) return false;
+  try {
+    // Check if the URL is used anywhere else in exhibition_art or portfolio
+    const { count: exhCount } = await supabase
+      .from('exhibition_art')
+      .select('id', { count: 'exact', head: true })
+      .or(`cover_image.eq.${url}`);
+      
+    const { count: portCount } = await supabase
+      .from('portfolio')
+      .select('id', { count: 'exact', head: true })
+      .eq('image_url', url);
+
+    if ((exhCount || 0) > 0 || (portCount || 0) > 0) {
+      console.log('File is referenced elsewhere, skipping deletion:', url);
+      return false;
+    }
+
+    // Parse storage path
+    const marker = '/storage/v1/object/public/media-vault/';
+    const index = url.indexOf(marker);
+    if (index === -1) return false;
+    const storagePath = decodeURIComponent(url.substring(index + marker.length));
+
+    // Delete from Supabase Storage
+    const { error: storageErr } = await supabase.storage.from('media-vault').remove([storagePath]);
+    if (storageErr) {
+      console.error('Failed to remove orphan file from storage:', storageErr.message);
+    }
+
+    // Delete from media_vault table
+    const { error: dbErr } = await supabase.from('media_vault').delete().eq('url', url);
+    if (dbErr) {
+      console.error('Failed to remove orphan file database metadata:', dbErr.message);
+    }
+
+    return true;
+  } catch (err: any) {
+    console.error('Failed to delete orphan file:', err.message);
+    return false;
+  }
+}
+

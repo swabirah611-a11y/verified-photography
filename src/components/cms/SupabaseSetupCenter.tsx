@@ -132,7 +132,6 @@ CREATE POLICY p_public_read_ai_analysis_results ON public.ai_analysis_results FO
 
 DROP POLICY IF EXISTS p_public_insert_ai_analysis_results ON public.ai_analysis_results;
 CREATE POLICY p_public_insert_ai_analysis_results ON public.ai_analysis_results FOR INSERT WITH CHECK (true);`,
-TargetContent:
   auth: `-- USER PROFILE TRIGGERS & HELPERS
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$

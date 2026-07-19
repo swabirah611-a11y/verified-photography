@@ -350,14 +350,16 @@ export default function MediaUploader({
       const { data: exhibRef } = await supabase.from('exhibition_art').select('id, title').eq('cover_image', asset.url);
       
       // Check current configuration states (e.g. Hero, About)
-      const currentConfigRaw = localStorage.getItem('verified_cms_config');
       let usageInConfig = false;
-      if (currentConfigRaw) {
-        const configObj = JSON.parse(currentConfigRaw);
+      try {
+        const { getCmsConfig } = await import('../../lib/supabase');
+        const configObj = await getCmsConfig();
         const configStr = JSON.stringify(configObj);
         if (configStr.includes(asset.url)) {
           usageInConfig = true;
         }
+      } catch (e) {
+        console.warn('Failed to query current CMS configuration for asset usage:', e);
       }
 
       const referencesFound: string[] = [];

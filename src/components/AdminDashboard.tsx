@@ -52,7 +52,13 @@ import {
   supabase,
   getPortfolioItems,
   savePortfolioItem,
-  deletePortfolioItem
+  deletePortfolioItem,
+  getExhibitions,
+  saveExhibition,
+  deleteExhibition,
+  Exhibition,
+  lastExhibitionError,
+  deleteOrphanFile
 } from '../lib/supabase';
 
 // Modular CMS Section Subcomponents
@@ -99,6 +105,12 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [formCameraSetup, setFormCameraSetup] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Direct Device Upload states
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   // Bookings state
   const [bookings, setBookings] = useState<any[]>([]);
   
@@ -134,6 +146,21 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     setBookings(fetched);
   };
 
+  const loadPortfolioData = async () => {
+    const exhibitions = await getExhibitions();
+    const mapped: PortfolioItem[] = exhibitions.map(e => ({
+      id: e.id,
+      title: e.title,
+      category: e.category,
+      location: e.tags?.[0] || 'Studio Capture',
+      image: e.cover_image,
+      description: e.description || '',
+      date: e.created_at ? new Date(e.created_at).getFullYear().toString() : '2026',
+      cameraSetup: e.tags?.[1] || 'Sony Custom G-Master'
+    }));
+    setPortfolioItems(mapped);
+  };
+
   // Initialize data
   useEffect(() => {
     // 1. Get active session details asynchronously from Supabase
@@ -158,10 +185,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     loadCmsConfigData();
 
     // 3. Load Portfolio items
-    const loadPortfolioData = async () => {
-      const items = await getPortfolioItems();
-      setPortfolioItems(items);
-    };
     loadPortfolioData();
 
     // 4. Load Bookings
@@ -180,6 +203,54 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   useEffect(() => {
     window.addEventListener('bookings_updated', loadBookingsData);
     return () => window.removeEventListener('bookings_updated', loadBookingsData);
+  }, []);
+
+  // Listen to exhibitions_updated and cross-tab triggers
+  useEffect(() => {
+    // 1. Local event listener
+    window.addEventListener('exhibitions_updated', loadPortfolioData);
+
+    // 2. BroadcastChannel listener
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel('exhibitions_sync');
+      channel.onmessage = (event) => {
+        if (event.data === 'refresh') {
+          loadPortfolioData();
+        }
+      };
+    } catch (e) {
+      console.warn('BroadcastChannel not supported:', e);
+    }
+
+    // 3. Supabase Realtime listener
+    let realtimeSubscription: any = null;
+    if (supabase) {
+      try {
+        realtimeSubscription = supabase
+          .channel('exhibition_art_changes_admin')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'exhibition_art' },
+            () => {
+              loadPortfolioData();
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscription failed:', err);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('exhibitions_updated', loadPortfolioData);
+      if (channel) {
+        channel.close();
+      }
+      if (supabase && realtimeSubscription) {
+        supabase.removeChannel(realtimeSubscription);
+      }
+    };
   }, []);
 
   // Inactivity tracking: resets timer on activity
@@ -238,34 +309,100 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     e.preventDefault();
     setFormError(null);
 
-    if (!formTitle || !formImage || !formDescription || !formDate || !formLocation) {
-      setFormError('Please complete all required fields.');
+    if (!formTitle || (!formImage && !selectedFile) || !formDescription || !formDate || !formLocation) {
+      setFormError('Please complete all required fields (provide either a direct file upload or a reference URL).');
       return;
     }
 
-    const newItem: PortfolioItem = {
-      id: editingItemId || 'port-' + Date.now(),
+    let imageUrlToSave = formImage;
+
+    if (selectedFile) {
+      setUploading(true);
+      setUploadProgress(20);
+      try {
+        if (!supabase) {
+          throw new Error('Supabase is uninitialized. Real cloud storage is required.');
+        }
+
+        setUploadProgress(45);
+        const fileExt = selectedFile.name.split('.').pop() || 'png';
+        const cleanName = selectedFile.name.split('.')[0].replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+        const storagePath = `portfolio/${cleanName}.${fileExt}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('media-vault')
+          .upload(storagePath, selectedFile, {
+            contentType: selectedFile.type,
+            cacheControl: '31536000',
+            upsert: true
+          });
+
+        if (uploadErr) {
+          throw new Error(`Storage upload failed: ${uploadErr.message}`);
+        }
+
+        setUploadProgress(85);
+        const publicUrl = supabase.storage.from('media-vault').getPublicUrl(storagePath).data.publicUrl;
+        imageUrlToSave = publicUrl;
+
+        // Register in media_vault metadata registry
+        const dbRow = {
+          filename: `${cleanName}.${fileExt}`,
+          original_filename: selectedFile.name,
+          bucket: 'media-vault',
+          folder: 'portfolio',
+          url: publicUrl,
+          mime_type: selectedFile.type,
+          file_size: selectedFile.size
+        };
+        const { error: dbErr } = await supabase.from('media_vault').insert([dbRow]);
+        if (dbErr) {
+          throw new Error(`Media vault database registration failed: ${dbErr.message}`);
+        }
+
+      } catch (err: any) {
+        console.error('Image upload failed:', err);
+        setFormError(`Image upload failed: ${err.message}`);
+        setUploading(false);
+        return;
+      } finally {
+        setUploadProgress(100);
+        setUploading(false);
+      }
+    }
+
+    const cleanExhib: Exhibition = {
+      id: editingItemId || 'exh-' + Math.random().toString(36).substr(2, 9),
       title: formTitle,
       category: formCategory,
-      location: formLocation,
-      image: formImage,
       description: formDescription,
-      date: formDate,
-      cameraSetup: formCameraSetup || 'Sony Custom G-Master'
+      cover_image: imageUrlToSave,
+      gallery_images: [imageUrlToSave],
+      videos: [],
+      tags: [formLocation, formCameraSetup || 'Sony Custom G-Master'],
+      featured: true,
+      published: true,
+      display_order: 0
     };
 
-    const success = await savePortfolioItem(newItem);
+    const success = await saveExhibition(cleanExhib);
     if (success) {
       if (editingItemId) {
-        addActivityLog(`Modified portfolio piece: ${formTitle}`, 'info');
+        addActivityLog(`Modified masterpiece exhibition: ${formTitle}`, 'info');
       } else {
-        addActivityLog(`Added portfolio masterpiece: ${formTitle}`, 'success');
+        addActivityLog(`Added masterpiece exhibition: ${formTitle}`, 'success');
       }
-      const freshItems = await getPortfolioItems();
-      setPortfolioItems(freshItems);
+      await loadPortfolioData();
       resetForm();
     } else {
-      setFormError('Failed to save masterpiece to database.');
+      const errMsg = lastExhibitionError || 'Failed to save masterpiece to exhibition_art database.';
+      setFormError(errMsg);
+      
+      // Safely remove the newly uploaded orphan file
+      if (!editingItemId && imageUrlToSave) {
+        await deleteOrphanFile(imageUrlToSave);
+        setFormImage(''); // clear cover image so they can select/upload again
+      }
     }
   };
 
@@ -280,16 +417,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     setEditingItemId(null);
     setIsAddingItem(false);
     setFormError(null);
+    setSelectedFile(null);
+    setLocalPreview(null);
+    setUploadProgress(0);
+    setUploading(false);
   };
 
   const handleDeletePortfolioItem = async (itemId: string) => {
     const targetItem = portfolioItems.find(i => i.id === itemId);
     if (window.confirm(`Are you sure you want to remove "${targetItem?.title || 'this item'}" from the digital exhibition?`)) {
-      const success = await deletePortfolioItem(itemId);
+      const success = await deleteExhibition(itemId);
       if (success) {
-        addActivityLog(`Removed portfolio piece: ${targetItem?.title || itemId}`, 'warn');
-        const freshItems = await getPortfolioItems();
-        setPortfolioItems(freshItems);
+        addActivityLog(`Removed exhibition masterpiece: ${targetItem?.title || itemId}`, 'warn');
+        await loadPortfolioData();
       } else {
         alert('Failed to delete masterpiece from database.');
       }
@@ -715,8 +855,86 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                             <input type="text" value={formTitle} onChange={e => setFormTitle(e.target.value)} required placeholder="Traditional Elegance" className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Image Reference URL</label>
-                            <input type="text" value={formImage} onChange={e => setFormImage(e.target.value)} required placeholder="https://images.unsplash.com..." className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white" />
+                            <label className="block text-[10px] font-mono text-[#A7C4B8] uppercase mb-1">Image / Masterpiece File</label>
+                            <div className="flex flex-col gap-3">
+                              {/* File Input and visual state indicator */}
+                              <div className="flex items-center gap-3">
+                                <label className="flex-1 flex flex-col items-center justify-center border border-dashed border-white/10 hover:border-[#2EC4B6]/50 rounded-xl p-3 bg-black/20 cursor-pointer transition-colors group">
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        if (!file.type.startsWith('image/')) {
+                                          alert('Please select a valid image file.');
+                                          return;
+                                        }
+                                        setSelectedFile(file);
+                                        setLocalPreview(URL.createObjectURL(file));
+                                        if (!formTitle) {
+                                          const cleanName = file.name.split('.')[0].replace(/[^a-zA-Z0-9 ]/g, '');
+                                          setFormTitle(cleanName);
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <Camera className="w-4 h-4 text-[#A7C4B8] group-hover:text-[#2EC4B6] transition-colors" />
+                                    <span className="text-xs text-white font-space">Upload Image</span>
+                                  </div>
+                                  <span className="text-[9px] text-[#A7C4B8] mt-1 font-mono uppercase">Click to select file from device</span>
+                                </label>
+
+                                {localPreview && (
+                                  <div className="relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 flex-shrink-0 bg-black/30">
+                                    <img src={localPreview} alt="Local preview" className="w-full h-full object-cover" />
+                                    <button 
+                                      type="button" 
+                                      onClick={() => {
+                                        setSelectedFile(null);
+                                        setLocalPreview(null);
+                                      }}
+                                      className="absolute inset-0 bg-black/70 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity text-[9px] text-red-400 font-mono font-bold uppercase cursor-pointer"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Progress bar / uploading state */}
+                              {uploading && (
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[9px] font-mono text-[#2EC4B6]">
+                                    <span>UPLOADING TO CLOUD VAULT...</span>
+                                    <span>{uploadProgress}%</span>
+                                  </div>
+                                  <div className="w-full h-1 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                                    <div className="h-full bg-[#2EC4B6] transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Paste URL fallback */}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-mono text-brand-muted uppercase">OR PASTE DIRECT URL:</span>
+                                <input 
+                                  type="text" 
+                                  value={formImage} 
+                                  onChange={e => {
+                                    setFormImage(e.target.value);
+                                    if (selectedFile) {
+                                      setSelectedFile(null);
+                                      setLocalPreview(null);
+                                    }
+                                  }} 
+                                  placeholder="https://images.unsplash.com..." 
+                                  className="flex-1 px-3 py-1.5 rounded-lg bg-black/30 border border-white/10 text-[11px] text-white focus:border-[#2EC4B6]/30 outline-none" 
+                                />
+                              </div>
+                            </div>
                           </div>
                         </div>
 

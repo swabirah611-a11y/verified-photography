@@ -91,8 +91,7 @@ export default function AboutSection({
     setMousePos({ x: 0, y: 0 });
   };
 
-  // Photography Categories/Frames
-  const galleryFrames = [
+  const defaultGalleryFrames = [
     {
       title: 'Wedding Photography',
       image: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg',
@@ -161,8 +160,15 @@ export default function AboutSection({
     }
   ];
 
+  // Photography Categories/Frames (Supabase-driven)
+  const galleryFrames = cmsConfig?.about?.galleryFrames && cmsConfig.about.galleryFrames.length > 0 
+    ? cmsConfig.about.galleryFrames 
+    : defaultGalleryFrames;
+
   // Feature Cards
-  const featureCards = (cmsConfig?.about?.features || [
+  const featureCards = (cmsConfig?.about?.features && cmsConfig.about.features.length > 0 
+    ? cmsConfig.about.features 
+    : [
     { title: 'Professional Photography', desc: 'Creative storytelling through every photograph.', iconName: 'Camera' },
     { title: 'Professional Editing', desc: 'High-end color grading and cinematic retouching.', iconName: 'Palette' },
     { title: 'Fast Delivery', desc: 'Timely delivery without compromising quality.', iconName: 'Zap' },
@@ -177,7 +183,9 @@ export default function AboutSection({
   });
 
   // Stats Data
-  const statsData = cmsConfig?.about?.stats || [
+  const statsData = cmsConfig?.about?.stats && cmsConfig.about.stats.length > 0 
+    ? cmsConfig.about.stats 
+    : [
     { value: 500, suffix: '+', label: 'Happy Clients' },
     { value: 1200, suffix: '+', label: 'Projects Completed' },
     { value: 6, suffix: '+', label: 'Years of Experience' },
@@ -185,7 +193,9 @@ export default function AboutSection({
   ];
 
   // Timeline Steps
-  const timelineSteps = cmsConfig?.about?.timeline || [
+  const timelineSteps = cmsConfig?.about?.timeline && cmsConfig.about.timeline.length > 0 
+    ? cmsConfig.about.timeline 
+    : [
     { title: 'Consultation', desc: 'Understanding your unique story, goals, and ideal visual vibes.' },
     { title: 'Planning', desc: 'Selecting pristine backdrops, coordinating wardrobes, and crafting moodboards.' },
     { title: 'Photoshoot', desc: 'High-concept execution with state-of-the-art cinematic lighting rigs.' },

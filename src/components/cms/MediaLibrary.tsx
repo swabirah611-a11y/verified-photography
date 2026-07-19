@@ -44,7 +44,7 @@ import {
   CheckCircle,
   XCircle
 } from 'lucide-react';
-import { supabase, getExhibitions, saveExhibition, deleteExhibition, Exhibition } from '../../lib/supabase';
+import { supabase, getExhibitions, saveExhibition, deleteExhibition, Exhibition, lastExhibitionError, deleteOrphanFile } from '../../lib/supabase';
 import MediaUploader from './MediaUploader';
 
 // Define the interface for the rich assets managed in the DAM system
@@ -194,11 +194,7 @@ export default function MediaLibrary() {
         if (error) {
           console.warn('Database select on media_vault failed:', error.message);
         } else if (data) {
-          // Sync database files with our rich metadata fallback stored in localStorage
-          const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-          
           fetchedAssets = data.map((item: any) => {
-            const extra = richMetadataMap[item.url] || {};
             const aiDataRow = aiResultsMap[item.url] || null;
             return {
               id: item.id,
@@ -213,27 +209,27 @@ export default function MediaLibrary() {
               file_size: item.file_size || 0,
               uploaded_at: item.uploaded_at || new Date().toISOString(),
               
-              // Rich metadata bindings with robust fallbacks
-              title: extra.title || aiDataRow?.title || item.original_filename?.split('.')[0].replace(/[-_]/g, ' ') || item.filename.split('.')[0].replace(/[-_]/g, ' ') || 'Untitled Frame',
-              description: extra.description || aiDataRow?.description || '',
-              alt_text: extra.alt_text || aiDataRow?.seo?.alt_text || extra.title || 'Verified photography capture asset',
-              category: extra.category || aiDataRow?.category || 'General',
-              tags: extra.tags || aiDataRow?.tags || ['Verified', 'Edo Capture'],
-              photographer: extra.photographer || 'Alhassan Bello',
-              location: extra.location || aiDataRow?.location || 'Ekpoma, Edo State',
-              event: extra.event || aiDataRow?.seo?.caption || '',
-              camera: extra.camera || aiDataRow?.camera?.camera || 'Sony Alpha 7R V',
-              lens: extra.lens || aiDataRow?.camera?.lens || 'Sony FE 85mm f/1.4 GM',
-              iso: extra.iso || aiDataRow?.camera?.iso || '100',
-              shutter_speed: extra.shutter_speed || aiDataRow?.camera?.shutter_speed || '1/250s',
-              aperture: extra.aperture || aiDataRow?.camera?.aperture || 'f/1.4',
-              date_taken: extra.date_taken || aiDataRow?.camera?.date_taken || item.uploaded_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-              featured: !!extra.featured,
-              visibility: extra.visibility !== false,
-              copyright: extra.copyright || '© VERIFIED PHOTOGRAPHY',
-              license: extra.license || 'Standard Professional Portrait Use',
-              color_palette: extra.color_palette || aiDataRow?.colors?.dominant_colors || ['#071A14', '#10261F', '#2EC4B6', '#A7C4B8'],
-              thumbnail_url: extra.thumbnail_url || item.url,
+              // Rich metadata bindings with robust fallbacks from database row
+              title: aiDataRow?.title || item.original_filename?.split('.')[0].replace(/[-_]/g, ' ') || item.filename.split('.')[0].replace(/[-_]/g, ' ') || 'Untitled Frame',
+              description: aiDataRow?.description || '',
+              alt_text: aiDataRow?.seo?.alt_text || aiDataRow?.title || 'Verified photography capture asset',
+              category: aiDataRow?.category || 'General',
+              tags: aiDataRow?.tags || ['Verified', 'Edo Capture'],
+              photographer: aiDataRow?.photographer || 'Alhassan Bello',
+              location: aiDataRow?.location || 'Ekpoma, Edo State',
+              event: aiDataRow?.seo?.caption || '',
+              camera: aiDataRow?.camera?.camera || 'Sony Alpha 7R V',
+              lens: aiDataRow?.camera?.lens || 'Sony FE 85mm f/1.4 GM',
+              iso: aiDataRow?.camera?.iso || '100',
+              shutter_speed: aiDataRow?.camera?.shutter_speed || '1/250s',
+              aperture: aiDataRow?.camera?.aperture || 'f/1.4',
+              date_taken: aiDataRow?.camera?.date_taken || item.uploaded_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+              featured: !!aiDataRow?.featured,
+              visibility: aiDataRow?.visibility !== false,
+              copyright: aiDataRow?.copyright || '© VERIFIED PHOTOGRAPHY',
+              license: aiDataRow?.license || 'Standard Professional Portrait Use',
+              color_palette: aiDataRow?.colors?.dominant_colors || ['#071A14', '#10261F', '#2EC4B6', '#A7C4B8'],
+              thumbnail_url: aiDataRow?.thumbnail_url || item.url,
               
               // AI Intelligence parameters
               aiAnalysis: aiDataRow ? {
@@ -498,31 +494,43 @@ export default function MediaLibrary() {
 
         updateQueueItemStatus(nextItem.id, 'metadata', 97, uploadSpeed);
 
-        // Write custom metadata maps (synced with AI generated attributes if available)
-        const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-        richMetadataMap[mainUrl] = {
-          title: aiResult?.title || nextItem.file.name.split('.')[0].replace(/[-_]/g, ' '),
-          description: aiResult?.description || `Bespoke visual frame uploaded via Verified Digital Asset Management. Originally named ${nextItem.file.name}.`,
-          alt_text: aiResult?.seo?.alt_text || aiResult?.title || nextItem.file.name.split('.')[0].replace(/[-_]/g, ' '),
-          category: aiResult?.category || 'General',
-          tags: aiResult?.tags || ['Verified', 'Dynamic Upload'],
-          photographer: 'Alhassan Bello',
-          location: aiResult?.location || 'Ekpoma capture venue',
-          event: aiResult?.seo?.caption || 'Premium Shoot Session',
-          camera: aiResult?.camera?.camera || 'Sony Alpha 7R V',
-          lens: aiResult?.camera?.lens || 'Sony FE 85mm f/1.4 GM',
-          iso: aiResult?.camera?.iso || '100',
-          shutter_speed: aiResult?.camera?.shutter_speed || '1/200s',
-          aperture: aiResult?.camera?.aperture || 'f/1.8',
-          date_taken: aiResult?.camera?.date_taken || new Date().toISOString().split('T')[0],
-          featured: false,
-          visibility: true,
-          copyright: '© VERIFIED PHOTOGRAPHY',
-          license: 'Standard Commercial License',
-          color_palette: aiResult?.colors?.dominant_colors || ['#071A14', '#10261F', '#2EC4B6', '#A7C4B8'],
-          thumbnail_url: thumbUrl
-        };
-        localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
+        // Save directly to ai_analysis_results in Supabase
+        if (supabase) {
+          const dbRow = {
+            image_url: mainUrl,
+            filename: nextItem.file.name,
+            original_filename: nextItem.file.name,
+            title: aiResult?.title || nextItem.file.name.split('.')[0].replace(/[-_]/g, ' '),
+            description: aiResult?.description || `Bespoke visual frame uploaded via Verified Digital Asset Management. Originally named ${nextItem.file.name}.`,
+            category: aiResult?.category || 'General',
+            tags: aiResult?.tags || ['Verified', 'Dynamic Upload'],
+            location: aiResult?.location || 'Ekpoma capture venue',
+            status: 'pending_review',
+            seo: { alt_text: aiResult?.seo?.alt_text || aiResult?.title || nextItem.file.name.split('.')[0].replace(/[-_]/g, ' '), caption: aiResult?.seo?.caption || 'Premium Shoot Session' },
+            camera: {
+              camera: aiResult?.camera?.camera || 'Sony Alpha 7R V',
+              lens: aiResult?.camera?.lens || 'Sony FE 85mm f/1.4 GM',
+              iso: aiResult?.camera?.iso || '100',
+              shutter_speed: aiResult?.camera?.shutter_speed || '1/200s',
+              aperture: aiResult?.camera?.aperture || 'f/1.8',
+              date_taken: aiResult?.camera?.date_taken || new Date().toISOString().split('T')[0]
+            },
+            colors: { dominant_colors: aiResult?.colors?.dominant_colors || ['#071A14', '#10261F', '#2EC4B6', '#A7C4B8'] }
+          };
+
+          const { data: existingRow } = await supabase
+            .from('ai_analysis_results')
+            .select('id')
+            .eq('image_url', mainUrl)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingRow) {
+            await supabase.from('ai_analysis_results').update(dbRow).eq('id', existingRow.id);
+          } else {
+            await supabase.from('ai_analysis_results').insert([dbRow]);
+          }
+        }
 
         updateQueueItemStatus(nextItem.id, 'success', 100, uploadSpeed);
         showToast(`✓ Uploaded and analyzed ${nextItem.file.name} successfully!`, 'success');
@@ -604,33 +612,46 @@ export default function MediaLibrary() {
 
   const handleSaveMetadataChanges = async (updatedAsset: DamAsset) => {
     try {
-      const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-      
-      // Update rich local storage mapping
-      richMetadataMap[updatedAsset.url] = {
-        title: updatedAsset.title,
-        description: updatedAsset.description,
-        alt_text: updatedAsset.alt_text,
-        category: updatedAsset.category,
-        tags: updatedAsset.tags,
-        photographer: updatedAsset.photographer,
-        location: updatedAsset.location,
-        event: updatedAsset.event,
-        camera: updatedAsset.camera,
-        lens: updatedAsset.lens,
-        iso: updatedAsset.iso,
-        shutter_speed: updatedAsset.shutter_speed,
-        aperture: updatedAsset.aperture,
-        date_taken: updatedAsset.date_taken,
-        featured: updatedAsset.featured,
-        visibility: updatedAsset.visibility,
-        copyright: updatedAsset.copyright,
-        license: updatedAsset.license,
-        color_palette: updatedAsset.color_palette,
-        thumbnail_url: updatedAsset.thumbnail_url || updatedAsset.url
-      };
+      if (supabase) {
+        const dbRow = {
+          image_url: updatedAsset.url,
+          filename: updatedAsset.filename,
+          title: updatedAsset.title,
+          description: updatedAsset.description,
+          category: updatedAsset.category,
+          tags: updatedAsset.tags,
+          location: updatedAsset.location,
+          status: 'approved',
+          seo: { alt_text: updatedAsset.alt_text, caption: updatedAsset.event },
+          camera: {
+            camera: updatedAsset.camera,
+            lens: updatedAsset.lens,
+            iso: updatedAsset.iso,
+            shutter_speed: updatedAsset.shutter_speed,
+            aperture: updatedAsset.aperture,
+            date_taken: updatedAsset.date_taken
+          },
+          colors: { dominant_colors: updatedAsset.color_palette },
+          featured: updatedAsset.featured,
+          visibility: updatedAsset.visibility,
+          photographer: updatedAsset.photographer,
+          copyright: updatedAsset.copyright,
+          license: updatedAsset.license
+        };
 
-      localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
+        const { data: existingRow } = await supabase
+          .from('ai_analysis_results')
+          .select('id')
+          .eq('image_url', updatedAsset.url)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingRow) {
+          await supabase.from('ai_analysis_results').update(dbRow).eq('id', existingRow.id);
+        } else {
+          await supabase.from('ai_analysis_results').insert([dbRow]);
+        }
+      }
 
       // Also save to standard public portfolio table so it synchronizes on public gallery
       if (updatedAsset.featured && supabase) {
@@ -772,32 +793,6 @@ export default function MediaLibrary() {
         }
       }
 
-      // Update rich local storage mapping
-      const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-      richMetadataMap[asset.url] = {
-        title: approvedAsset.title,
-        description: approvedAsset.description,
-        alt_text: approvedAsset.alt_text,
-        category: approvedAsset.category,
-        tags: approvedAsset.tags,
-        photographer: approvedAsset.photographer,
-        location: approvedAsset.location,
-        event: approvedAsset.event,
-        camera: approvedAsset.camera,
-        lens: approvedAsset.lens,
-        iso: approvedAsset.iso,
-        shutter_speed: approvedAsset.shutter_speed,
-        aperture: approvedAsset.aperture,
-        date_taken: approvedAsset.date_taken,
-        featured: approvedAsset.featured,
-        visibility: approvedAsset.visibility,
-        copyright: approvedAsset.copyright,
-        license: approvedAsset.license,
-        color_palette: approvedAsset.color_palette,
-        thumbnail_url: approvedAsset.thumbnail_url || approvedAsset.url
-      };
-      localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
-
       showToast('✓ AI suggestions approved and applied!', 'success');
       
       // Update states
@@ -879,12 +874,10 @@ export default function MediaLibrary() {
 
         // Also remove from portfolio table if featured
         await supabase.from('portfolio').delete().eq('image_url', asset.url);
-      }
 
-      // Step 3: Delete local rich metadata cache
-      const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-      delete richMetadataMap[asset.url];
-      localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
+        // Also remove from ai_analysis_results
+        await supabase.from('ai_analysis_results').delete().eq('image_url', asset.url);
+      }
 
       setAssets(prev => prev.filter(a => a.id !== asset.id));
       setSelectedIds(prev => prev.filter(id => id !== asset.id));
@@ -928,11 +921,8 @@ export default function MediaLibrary() {
           }
           await supabase.from('media_vault').delete().eq('id', asset.id);
           await supabase.from('portfolio').delete().eq('image_url', asset.url);
+          await supabase.from('ai_analysis_results').delete().eq('image_url', asset.url);
         }
-        
-        const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-        delete richMetadataMap[asset.url];
-        localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
         
         successCount++;
       }
@@ -955,36 +945,80 @@ export default function MediaLibrary() {
     showToast(`Downloading ${selectedAssets.length} files...`, 'info');
   };
 
-  const handleBulkCategoryChange = (category: DamAsset['category']) => {
-    const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
+  const handleBulkCategoryChange = async (category: DamAsset['category']) => {
+    if (supabase) {
+      try {
+        const selectedAssets = assets.filter(a => selectedIds.includes(a.id));
+        for (const asset of selectedAssets) {
+          const { data: existingRow } = await supabase
+            .from('ai_analysis_results')
+            .select('id')
+            .eq('image_url', asset.url)
+            .limit(1)
+            .maybeSingle();
+
+          const dbRow = {
+            image_url: asset.url,
+            category: category
+          };
+
+          if (existingRow) {
+            await supabase.from('ai_analysis_results').update(dbRow).eq('id', existingRow.id);
+          } else {
+            await supabase.from('ai_analysis_results').insert([dbRow]);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to apply bulk category update in DB:', e);
+      }
+    }
     
     const updatedAssets = assets.map(asset => {
       if (selectedIds.includes(asset.id)) {
-        const extra = richMetadataMap[asset.url] || {};
-        richMetadataMap[asset.url] = { ...extra, category };
         return { ...asset, category };
       }
       return asset;
     });
 
-    localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
     setAssets(updatedAssets);
     showToast(`✓ Moved ${selectedIds.length} assets to ${category}`, 'success');
   };
 
-  const handleBulkArchive = (archive: boolean) => {
-    const richMetadataMap = JSON.parse(localStorage.getItem('verified_dam_rich_metadata') || '{}');
-    
+  const handleBulkArchive = async (archive: boolean) => {
+    if (supabase) {
+      try {
+        const selectedAssets = assets.filter(a => selectedIds.includes(a.id));
+        for (const asset of selectedAssets) {
+          const { data: existingRow } = await supabase
+            .from('ai_analysis_results')
+            .select('id')
+            .eq('image_url', asset.url)
+            .limit(1)
+            .maybeSingle();
+
+          const dbRow = {
+            image_url: asset.url,
+            visibility: !archive
+          };
+
+          if (existingRow) {
+            await supabase.from('ai_analysis_results').update(dbRow).eq('id', existingRow.id);
+          } else {
+            await supabase.from('ai_analysis_results').insert([dbRow]);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to apply bulk visibility update in DB:', e);
+      }
+    }
+
     const updatedAssets = assets.map(asset => {
       if (selectedIds.includes(asset.id)) {
-        const extra = richMetadataMap[asset.url] || {};
-        richMetadataMap[asset.url] = { ...extra, visibility: !archive };
         return { ...asset, visibility: !archive };
       }
       return asset;
     });
 
-    localStorage.setItem('verified_dam_rich_metadata', JSON.stringify(richMetadataMap));
     setAssets(updatedAssets);
     showToast(`✓ ${archive ? 'Archived' : 'Activated'} ${selectedIds.length} assets`, 'success');
   };
@@ -1026,7 +1060,14 @@ export default function MediaLibrary() {
         
         loadMediaAndExhibitions();
       } else {
-        showToast('Error persisting exhibition to Database', 'warn');
+        const errorMsg = lastExhibitionError || 'Error persisting exhibition to Database';
+        showToast(errorMsg, 'warn');
+        
+        // Safely remove the newly uploaded orphan file
+        if (isNew && exhibFormCover) {
+          await deleteOrphanFile(exhibFormCover);
+          setExhibFormCover(''); // clear cover so they can retry uploading a valid image, while preserving other text fields
+        }
       }
     } catch (err: any) {
       console.error('Save exhibition exception:', err);
