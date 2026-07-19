@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, 
@@ -9,6 +9,7 @@ import {
   Sparkles 
 } from 'lucide-react';
 import MediaUploader from './cms/MediaUploader';
+import { supabase } from '../lib/supabase';
 
 interface ImageReplacerModalProps {
   isOpen: boolean;
@@ -25,39 +26,29 @@ export default function ImageReplacerModal({
 }: ImageReplacerModalProps) {
   const [customUrl, setCustomUrl] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [mediaAssets, setMediaAssets] = useState<Array<{ title: string; url: string }>>([]);
 
-  const PRESETS = [
-    {
-      title: 'Nigerian Traditional Gown',
-      url: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg',
-      fallback: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=800'
-    },
-    {
-      title: 'Fashion Editorial Auchi',
-      url: '/src/assets/images/fashion_editorial_auchi_1784211215673.jpg',
-      fallback: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800'
-    },
-    {
-      title: 'Graduation Portrait Ekpoma',
-      url: '/src/assets/images/graduation_portrait_ekpoma_1784211201712.jpg',
-      fallback: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=800'
-    },
-    {
-      title: 'Celebration Uromi',
-      url: '/src/assets/images/event_celebration_uromi_1784211232313.jpg',
-      fallback: 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=80&w=800'
-    },
-    {
-      title: 'Fidelity Camera Kit',
-      url: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800',
-      fallback: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800'
-    },
-    {
-      title: 'Glowing Sparkler Nuptials',
-      url: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800',
-      fallback: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800'
-    }
-  ];
+  useEffect(() => {
+    if (!isOpen || !supabase) return;
+    let active = true;
+    supabase
+      .from('media_vault')
+      .select('id, original_filename, filename, url')
+      .order('uploaded_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error('Unable to load Media Vault:', error);
+          setMediaAssets([]);
+          return;
+        }
+        setMediaAssets((data || []).map(asset => ({
+          title: asset.original_filename || asset.filename,
+          url: asset.url
+        })));
+      });
+    return () => { active = false; };
+  }, [isOpen]);
 
   const handleSave = () => {
     if (customUrl.trim()) {
@@ -122,7 +113,7 @@ export default function ImageReplacerModal({
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {PRESETS.map((preset) => {
+            {mediaAssets.map((preset) => {
               const isSelected = selectedPreset === preset.url;
               return (
                 <button
@@ -141,9 +132,6 @@ export default function ImageReplacerModal({
                     alt={preset.title}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = preset.fallback;
-                    }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2">
                     <span className="text-[9px] font-mono text-white/95 leading-none line-clamp-1">{preset.title}</span>
@@ -158,6 +146,9 @@ export default function ImageReplacerModal({
               );
             })}
           </div>
+          {mediaAssets.length === 0 && (
+            <p className="text-[10px] text-[#A7C4B8] py-4 text-center">No uploaded Media Vault images are available.</p>
+          )}
         </div>
 
         {/* Footer actions */}

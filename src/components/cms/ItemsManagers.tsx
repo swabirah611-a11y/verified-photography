@@ -268,7 +268,7 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
       id: editingId || 'team-' + Date.now(),
       name: teamName,
       role: teamRole,
-      photo: teamPhoto || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800',
+      photo: teamPhoto,
       bio: teamBio
     };
 
@@ -315,7 +315,7 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
       content: blogContent,
       category: blogCategory,
       tags: blogTags.split(',').map(t => t.trim()).filter(Boolean),
-      featuredImage: blogImage || 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800',
+      featuredImage: blogImage,
       date: blogDate,
       author: blogAuthor,
       seoTitle: blogSeoTitle || blogTitle,

@@ -44,7 +44,7 @@ import {
   CheckCircle,
   XCircle
 } from 'lucide-react';
-import { supabase, getExhibitions, saveExhibition, deleteExhibition, Exhibition, lastExhibitionError, deleteOrphanFile } from '../../lib/supabase';
+import { supabase, getExhibitions, saveExhibition, deleteExhibition, Exhibition } from '../../lib/supabase';
 import MediaUploader from './MediaUploader';
 
 // Define the interface for the rich assets managed in the DAM system
@@ -653,34 +653,6 @@ export default function MediaLibrary() {
         }
       }
 
-      // Also save to standard public portfolio table so it synchronizes on public gallery
-      if (updatedAsset.featured && supabase) {
-        const portfolioRow = {
-          title: updatedAsset.title,
-          category: updatedAsset.category === 'General' ? 'Portraits' : updatedAsset.category,
-          image_url: updatedAsset.url,
-          location: updatedAsset.location,
-          year: updatedAsset.date_taken?.split('-')[0] || '2026',
-          description: updatedAsset.description,
-          camera_setup: `${updatedAsset.camera} + ${updatedAsset.lens}`
-        };
-
-        // Check if there's an existing item with the same image url in portfolio table
-        const { data: exist } = await supabase
-          .from('portfolio')
-          .select('id')
-          .eq('image_url', updatedAsset.url)
-          .limit(1)
-          .maybeSingle();
-
-        if (exist) {
-          await supabase.from('portfolio').update(portfolioRow).eq('id', exist.id);
-        } else {
-          await supabase.from('portfolio').insert([portfolioRow]);
-        }
-        window.dispatchEvent(new Event('portfolio_items_updated'));
-      }
-
       showToast('✓ Asset metadata updated successfully!', 'success');
       setAssets(prev => prev.map(a => a.id === updatedAsset.id ? updatedAsset : a));
       if (previewAsset?.id === updatedAsset.id) {
@@ -872,8 +844,6 @@ export default function MediaLibrary() {
         // Step 2: Remove from media_vault Database Table
         await supabase.from('media_vault').delete().eq('id', asset.id);
 
-        // Also remove from portfolio table if featured
-        await supabase.from('portfolio').delete().eq('image_url', asset.url);
 
         // Also remove from ai_analysis_results
         await supabase.from('ai_analysis_results').delete().eq('image_url', asset.url);
@@ -920,7 +890,6 @@ export default function MediaLibrary() {
             }
           }
           await supabase.from('media_vault').delete().eq('id', asset.id);
-          await supabase.from('portfolio').delete().eq('image_url', asset.url);
           await supabase.from('ai_analysis_results').delete().eq('image_url', asset.url);
         }
         
@@ -1047,8 +1016,8 @@ export default function MediaLibrary() {
         display_order: isNew ? exhibitions.length : (exhibitions.find(x => x.id === exhibEditingId)?.display_order || 0)
       };
 
-      const success = await saveExhibition(cleanExhib);
-      if (success) {
+      const result = await saveExhibition(cleanExhib);
+      if (!result.error) {
         showToast(isNew ? '✓ Exhibition created!' : '✓ Exhibition updated!', 'success');
         
         // Reset buffers
@@ -1060,14 +1029,8 @@ export default function MediaLibrary() {
         
         loadMediaAndExhibitions();
       } else {
-        const errorMsg = lastExhibitionError || 'Error persisting exhibition to Database';
+        const errorMsg = `${result.error.code ? `[${result.error.code}] ` : ''}${result.error.message}`;
         showToast(errorMsg, 'warn');
-        
-        // Safely remove the newly uploaded orphan file
-        if (isNew && exhibFormCover) {
-          await deleteOrphanFile(exhibFormCover);
-          setExhibFormCover(''); // clear cover so they can retry uploading a valid image, while preserving other text fields
-        }
       }
     } catch (err: any) {
       console.error('Save exhibition exception:', err);
@@ -1106,8 +1069,8 @@ export default function MediaLibrary() {
 
   const handleToggleExhibitionPublish = async (exh: Exhibition) => {
     const updated = { ...exh, published: !exh.published };
-    const success = await saveExhibition(updated);
-    if (success) {
+    const result = await saveExhibition(updated);
+    if (!result.error) {
       showToast(updated.published ? '✓ Exhibition published!' : '✓ Exhibition set to Draft', 'success');
       loadMediaAndExhibitions();
     }
@@ -1122,8 +1085,8 @@ export default function MediaLibrary() {
       ...exh,
       gallery_images: [...exh.gallery_images, assetUrl]
     };
-    const success = await saveExhibition(updated);
-    if (success) {
+    const result = await saveExhibition(updated);
+    if (!result.error) {
       showToast(`✓ Added to "${exh.title}"!`, 'success');
       loadMediaAndExhibitions();
     }
@@ -1136,8 +1099,8 @@ export default function MediaLibrary() {
       ...exh,
       gallery_images: updatedImages
     };
-    const success = await saveExhibition(updated);
-    if (success) {
+    const result = await saveExhibition(updated);
+    if (!result.error) {
       showToast('Removed from exhibition portfolio', 'success');
       loadMediaAndExhibitions();
     }
@@ -1159,8 +1122,8 @@ export default function MediaLibrary() {
       ...exh,
       gallery_images: updatedImages
     };
-    const success = await saveExhibition(updated);
-    if (success) {
+    const result = await saveExhibition(updated);
+    if (!result.error) {
       loadMediaAndExhibitions();
     }
   };

@@ -243,7 +243,7 @@ export async function signInAdmin(email: string, password: string): Promise<Auth
       return { success: false, error: 'Authentication succeeded, but no user was returned.' };
     }
 
-    let role = 'admin'; // Default fallback role
+    let role = '';
 
     try {
       const { data: profile, error: profileError } = await supabase
@@ -253,22 +253,21 @@ export async function signInAdmin(email: string, password: string): Promise<Auth
         .single();
 
       if (profileError) {
-        if (profileError.code === 'PGRST116') {
-          // Auto-create database profile with 'admin' role if not exists
-          await supabase
-            .from('profiles')
-            .insert([{ id: data.user.id, email: data.user.email, role: 'admin' }]);
-        }
-      } else if (profile && profile.role) {
+        updateLastLogStatus('FAILED');
+        await supabase.auth.signOut();
+        return { success: false, error: `Unable to verify CMS role: ${profileError.message}` };
+      }
+      if (profile && profile.role) {
         role = profile.role;
       }
     } catch (profileCatchError: any) {
       console.warn("Profile check exception:", profileCatchError.message);
     }
 
-    if (role !== 'admin') {
+    if (!['super_admin', 'admin', 'editor'].includes(role)) {
       updateLastLogStatus('FAILED');
-      return { success: false, error: 'Unauthorized: Admin role is required.' };
+      await supabase.auth.signOut();
+      return { success: false, error: 'Unauthorized: A CMS role is required.' };
     }
 
     updateLastLogStatus('SUCCESS');
@@ -277,7 +276,7 @@ export async function signInAdmin(email: string, password: string): Promise<Auth
       success: true,
       user: {
         email: data.user.email || email,
-        role: 'admin',
+        role,
       },
     };
   } catch (err: any) {
@@ -314,9 +313,17 @@ export async function getAdminSession(): Promise<{ email: string; role: string }
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session && session.user) {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+      if (error || !profile || !['super_admin', 'admin', 'editor'].includes(profile.role)) {
+        return null;
+      }
       return {
         email: session.user.email || '',
-        role: 'admin'
+        role: profile.role
       };
     }
   } catch (err) {
@@ -363,7 +370,7 @@ export interface CmsConfig {
     stats: Array<{ label: string; value: number; suffix: string }>;
     timeline: Array<{ title: string; desc: string }>;
     features: Array<{ title: string; desc: string; iconName: string }>;
-    galleryFrames?: Array<{ title: string; image: string; fallbackImage: string; xOffset: number; yOffset: number; rotate: number; depth: number; borderColor: string; zIndex: number }>;
+    galleryFrames?: Array<{ title: string; image: string; fallbackImage?: string; xOffset: number; yOffset: number; rotate: number; depth: number; borderColor: string; zIndex: number }>;
   };
   services: Array<{
     id: string;
@@ -495,7 +502,7 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
     mainHeading: 'Capturing Stories',
     subheading: 'Beyond the Lens',
     description: 'Professional photography that transforms moments into timeless memories. Weddings, portraits, graduations, birthdays, events, and commercial photography with creativity, precision, and passion.',
-    bgImage: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg',
+    bgImage: '',
     videoUrl: '',
     ctaText: 'Book a Session',
     ctaLink: 'contact',
@@ -521,7 +528,7 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
     description: 'At VERIFIED PHOTOGRAPHY, we believe every smile, celebration, and milestone deserves to be preserved with creativity and authenticity. We don\'t simply take pictures, we capture emotions, stories, and memories that last a lifetime.',
     founderName: 'Alhassan "Verified" Bello',
     founderRole: 'Creative Director & Lead Photographer',
-    founderPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800',
+    founderPhoto: '',
     founderQuote: 'Visual storytelling isn\'t about the expensive camera; it\'s about knowing when the heart of a moment beats.',
     experienceYears: 6,
     stats: [
@@ -682,8 +689,8 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
     { id: 'faq-4', question: 'How can I secure my photoshoot date?', answer: 'You can reserve your slot directly through our booking portal. A 50% commitment fee is required to fully lock in your custom session date.', order: 4 }
   ],
   team: [
-    { id: 'team-1', name: 'Alhassan "Verified" Bello', role: 'Lead Photographer & Founder', photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800', bio: 'With over 6 years of professional visual experience, Alhassan specializes in high-concept cultural wedding coverage and editorial portraiture.', socialLinks: { instagram: '#' } },
-    { id: 'team-2', name: 'Esther Okojie', role: 'Chief Creative Editor', photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=800', bio: 'Esther heads the post-production department, crafting beautiful custom color profiles, skin retouches, and fine-art layouts.', socialLinks: { instagram: '#' } }
+    { id: 'team-1', name: 'Alhassan "Verified" Bello', role: 'Lead Photographer & Founder', photo: '', bio: 'With over 6 years of professional visual experience, Alhassan specializes in high-concept cultural wedding coverage and editorial portraiture.', socialLinks: { instagram: '#' } },
+    { id: 'team-2', name: 'Esther Okojie', role: 'Chief Creative Editor', photo: '', bio: 'Esther heads the post-production department, crafting beautiful custom color profiles, skin retouches, and fine-art layouts.', socialLinks: { instagram: '#' } }
   ],
   blogs: [
     {
@@ -692,7 +699,7 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
       content: 'Traditional weddings in Nigeria are a vibrant canvas of colors, fabrics, and jewelry. To capture the true essence, we employ customized color grading techniques. Our creative focus is to enhance the rich golds, deep reds, and vibrant greens without losing natural skin tones.',
       category: 'Weddings',
       tags: ['Color Science', 'Nuptials', 'Retouching'],
-      featuredImage: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&q=80&w=800',
+      featuredImage: '',
       date: '2026-06-15',
       author: 'Alhassan Bello',
       seoTitle: 'Mastering Traditional Wedding Color Grading | Verified Photo',
@@ -704,7 +711,7 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
       content: 'Shooting under the midday sun in Auchi Hills can be a photographer\'s nightmare. In this article, we explain our dynamic range strategies, including high-speed sync flash, custom scrim diffusers, and matching key light levels to the majestic sky background.',
       category: 'Commercial',
       tags: ['Lighting', 'Outdoor', 'Gear'],
-      featuredImage: 'https://images.unsplash.com/photo-1542038784456-1ea8e935640e?auto=format&fit=crop&q=80&w=800',
+      featuredImage: '',
       date: '2026-07-02',
       author: 'Esther Okojie',
       seoTitle: 'Outdoor Fashion Shoots & Lighting Guide | Verified Photo',
@@ -735,7 +742,7 @@ export const DEFAULT_CMS_CONFIG: CmsConfig = {
     title: 'VERIFIED PHOTOGRAPHY | Premium Storytelling & Visual Heritage',
     description: 'Professional photography in Ekpoma, Uromi, and Auchi. Capturing traditional weddings, graduations, birthdays, and high-fashion corporate portfolios.',
     keywords: 'verified photography, photography in ekpoma, uromi weddings, auchi hills fashion, nigerian traditional wedding photographer',
-    ogImage: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg'
+    ogImage: ''
   },
   advanced: {
     maintenanceMode: false,
@@ -1364,14 +1371,6 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
         await supabase.from('hero_canvas').insert([heroRow]);
       }
 
-      const defaultGalleryFrames = [
-        { title: 'Wedding Photography', image: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg', fallbackImage: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=800', xOffset: -120, yOffset: -100, rotate: -8, depth: 1.4, borderColor: 'border-[#2EC4B6]/20 hover:border-[#2EC4B6]/80', zIndex: 10 },
-        { title: 'Portrait Photography', image: '/src/assets/images/fashion_editorial_auchi_1784211215673.jpg', fallbackImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800', xOffset: 140, yOffset: -140, rotate: 10, depth: 0.9, borderColor: 'border-[#34D399]/20 hover:border-[#34D399]/80', zIndex: 5 },
-        { title: 'Graduation Photography', image: '/src/assets/images/graduation_portrait_ekpoma_1784211201712.jpg', fallbackImage: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=800', xOffset: -150, yOffset: 110, rotate: 6, depth: 1.8, borderColor: 'border-[#6EE7B7]/20 hover:border-[#6EE7B7]/80', zIndex: 12 },
-        { title: 'Birthday Photography', image: '/src/assets/images/event_celebration_uromi_1784211232313.jpg', fallbackImage: 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=80&w=800', xOffset: 150, yOffset: 90, rotate: -6, depth: 1.2, borderColor: 'border-[#10B981]/20 hover:border-[#10B981]/80', zIndex: 15 },
-        { title: 'Event Photography', image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800', fallbackImage: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800', xOffset: 0, yOffset: -20, rotate: 2, depth: 2.2, borderColor: 'border-[#2EC4B6]/30 hover:border-[#2EC4B6]/90', zIndex: 8 },
-        { title: 'Commercial Photography', image: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800', fallbackImage: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800', xOffset: 10, yOffset: 180, rotate: -4, depth: 0.6, borderColor: 'border-[#059669]/20 hover:border-[#059669]/80', zIndex: 6 }
-      ];
       const aboutRow = {
         biography: config.about?.description || '',
         experience: config.about?.experienceYears || 5,
@@ -1379,7 +1378,7 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
         mission: JSON.stringify({ title: config.about?.title, heading: config.about?.heading, headingHighlight: config.about?.headingHighlight }),
         vision: JSON.stringify({ founderName: config.about?.founderName, founderRole: config.about?.founderRole, founderQuote: config.about?.founderQuote }),
         achievements: (config.about?.stats || []).map(s => JSON.stringify(s)),
-        studio_images: [JSON.stringify({ timeline: config.about?.timeline, features: config.about?.features, galleryFrames: config.about?.galleryFrames || defaultGalleryFrames })]
+        studio_images: [JSON.stringify({ timeline: config.about?.timeline || [], features: config.about?.features || [], galleryFrames: config.about?.galleryFrames || [] })]
       };
       const { data: aboutExist } = await supabase.from('about_vision').select('id').limit(1).maybeSingle();
       if (aboutExist) {
@@ -1681,11 +1680,27 @@ export async function getExhibitions(): Promise<Exhibition[]> {
   return [];
 }
 
-export let lastExhibitionError: string | null = null;
+export interface SupabaseMutationError {
+  message: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+}
 
-export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
-  window.dispatchEvent(new Event('exhibitions_updated'));
-  lastExhibitionError = null;
+export interface SaveExhibitionResult {
+  data: Exhibition | null;
+  error: SupabaseMutationError | null;
+}
+
+const exhibitionCategories: Exhibition['category'][] = [
+  'Weddings',
+  'Portraits',
+  'Graduations',
+  'Events',
+  'Commercial'
+];
+
+export async function saveExhibition(exhibition: Exhibition): Promise<SaveExhibitionResult> {
 
   if (supabase) {
     try {
@@ -1693,29 +1708,41 @@ export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
       if (!session) {
         const errorMsg = 'Unauthorized: Session required for exhibitions writes.';
         console.warn(errorMsg);
-        lastExhibitionError = errorMsg;
-        return false;
+        return { data: null, error: { message: errorMsg, code: 'UNAUTHORIZED' } };
+      }
+
+      const title = exhibition.title?.trim();
+      const coverImage = exhibition.cover_image?.trim();
+      if (!title || !coverImage || !exhibitionCategories.includes(exhibition.category)) {
+        return {
+          data: null,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'A title, valid category, and uploaded cover image are required.'
+          }
+        };
       }
 
       const isNew = !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(exhibition.id);
       
       const dbRow = {
-        title: exhibition.title,
+        title,
         category: exhibition.category,
-        description: exhibition.description,
-        cover_image: exhibition.cover_image,
-        gallery_images: exhibition.gallery_images,
-        videos: exhibition.videos || [],
-        tags: exhibition.tags || [],
-        featured: !!exhibition.featured,
-        published: !!exhibition.published,
-        display_order: exhibition.display_order || 0
+        description: exhibition.description?.trim() || null,
+        cover_image: coverImage,
+        gallery_images: Array.isArray(exhibition.gallery_images) ? exhibition.gallery_images.filter(Boolean) : [],
+        videos: Array.isArray(exhibition.videos) ? exhibition.videos.filter(Boolean) : [],
+        tags: Array.isArray(exhibition.tags) ? exhibition.tags.filter(Boolean) : [],
+        featured: Boolean(exhibition.featured),
+        published: exhibition.published !== false,
+        display_order: Number.isInteger(Number(exhibition.display_order)) ? Number(exhibition.display_order) : 0
       };
 
       const payload = dbRow;
+      let savedRecord: any;
 
       if (isNew) {
-        const { data, error } = await supabase.from('exhibition_art').insert([dbRow]).select();
+        const { data, error } = await supabase.from('exhibition_art').insert(dbRow).select().single();
         if (error) {
           console.error("Exhibition insert failed", {
             message: error?.message,
@@ -1724,12 +1751,14 @@ export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
             hint: error?.hint,
             payload
           });
-          lastExhibitionError = `Database insert failed [${error.code || 'UNKNOWN'}]: ${error.message}`;
-          return false;
+          return {
+            data: null,
+            error: { message: error.message, code: error.code, details: error.details, hint: error.hint }
+          };
         }
-        console.log("Successfully inserted exhibition_art record:", data);
+        savedRecord = data;
       } else {
-        const { data, error } = await supabase.from('exhibition_art').update(dbRow).eq('id', exhibition.id).select();
+        const { data, error } = await supabase.from('exhibition_art').update(dbRow).eq('id', exhibition.id).select().single();
         if (error) {
           console.error("Exhibition update failed", {
             message: error?.message,
@@ -1738,10 +1767,12 @@ export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
             hint: error?.hint,
             payload
           });
-          lastExhibitionError = `Database update failed [${error.code || 'UNKNOWN'}]: ${error.message}`;
-          return false;
+          return {
+            data: null,
+            error: { message: error.message, code: error.code, details: error.details, hint: error.hint }
+          };
         }
-        console.log("Successfully updated exhibition_art record:", data);
+        savedRecord = data;
       }
 
       // Sync via BroadcastChannel
@@ -1751,13 +1782,14 @@ export async function saveExhibition(exhibition: Exhibition): Promise<boolean> {
         channel.close();
       } catch (e) {}
 
-      return true;
+      window.dispatchEvent(new Event('exhibitions_updated'));
+      return { data: savedRecord as Exhibition, error: null };
     } catch (err: any) {
       console.error('Supabase exhibition save exception:', err.message);
-      return false;
+      return { data: null, error: { message: err.message || 'Unexpected exhibition save error.' } };
     }
   }
-  return false;
+  return { data: null, error: { message: 'Supabase is not configured.', code: 'NOT_CONFIGURED' } };
 }
 
 export async function deleteExhibition(id: string): Promise<boolean> {
@@ -1839,4 +1871,3 @@ export async function deleteOrphanFile(url: string): Promise<boolean> {
     return false;
   }
 }
-

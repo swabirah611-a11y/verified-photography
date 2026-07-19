@@ -38,7 +38,6 @@ import {
   Menu,
   X
 } from 'lucide-react';
-import { PORTFOLIO_ITEMS } from '../data';
 import { PortfolioItem } from '../types';
 import { 
   signOutAdmin, 
@@ -56,9 +55,7 @@ import {
   getExhibitions,
   saveExhibition,
   deleteExhibition,
-  Exhibition,
-  lastExhibitionError,
-  deleteOrphanFile
+  Exhibition
 } from '../lib/supabase';
 
 // Modular CMS Section Subcomponents
@@ -359,6 +356,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         if (dbErr) {
           throw new Error(`Media vault database registration failed: ${dbErr.message}`);
         }
+        // Keep the confirmed cloud URL in the form so a database retry does not
+        // upload a duplicate Storage object.
+        setFormImage(publicUrl);
+        setSelectedFile(null);
+        setLocalPreview(publicUrl);
 
       } catch (err: any) {
         console.error('Image upload failed:', err);
@@ -385,8 +387,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       display_order: 0
     };
 
-    const success = await saveExhibition(cleanExhib);
-    if (success) {
+    const result = await saveExhibition(cleanExhib);
+    if (!result.error) {
       if (editingItemId) {
         addActivityLog(`Modified masterpiece exhibition: ${formTitle}`, 'info');
       } else {
@@ -395,14 +397,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       await loadPortfolioData();
       resetForm();
     } else {
-      const errMsg = lastExhibitionError || 'Failed to save masterpiece to exhibition_art database.';
+      const errMsg = `${result.error.code ? `[${result.error.code}] ` : ''}${result.error.message}`;
       setFormError(errMsg);
-      
-      // Safely remove the newly uploaded orphan file
-      if (!editingItemId && imageUrlToSave) {
-        await deleteOrphanFile(imageUrlToSave);
-        setFormImage(''); // clear cover image so they can select/upload again
-      }
     }
   };
 

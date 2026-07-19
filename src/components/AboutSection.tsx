@@ -91,79 +91,8 @@ export default function AboutSection({
     setMousePos({ x: 0, y: 0 });
   };
 
-  const defaultGalleryFrames = [
-    {
-      title: 'Wedding Photography',
-      image: '/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg',
-      fallbackImage: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&q=80&w=800',
-      xOffset: -120,
-      yOffset: -100,
-      rotate: -8,
-      depth: 1.4,
-      borderColor: 'border-[#2EC4B6]/20 hover:border-[#2EC4B6]/80',
-      zIndex: 10
-    },
-    {
-      title: 'Portrait Photography',
-      image: '/src/assets/images/fashion_editorial_auchi_1784211215673.jpg',
-      fallbackImage: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=800',
-      xOffset: 140,
-      yOffset: -140,
-      rotate: 10,
-      depth: 0.9,
-      borderColor: 'border-[#34D399]/20 hover:border-[#34D399]/80',
-      zIndex: 5
-    },
-    {
-      title: 'Graduation Photography',
-      image: '/src/assets/images/graduation_portrait_ekpoma_1784211201712.jpg',
-      fallbackImage: 'https://images.unsplash.com/photo-1523050854058-8df90110c9f1?auto=format&fit=crop&q=80&w=800',
-      xOffset: -150,
-      yOffset: 110,
-      rotate: 6,
-      depth: 1.8,
-      borderColor: 'border-[#6EE7B7]/20 hover:border-[#6EE7B7]/80',
-      zIndex: 12
-    },
-    {
-      title: 'Birthday Photography',
-      image: '/src/assets/images/event_celebration_uromi_1784211232313.jpg',
-      fallbackImage: 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?auto=format&fit=crop&q=80&w=800',
-      xOffset: 150,
-      yOffset: 90,
-      rotate: -6,
-      depth: 1.2,
-      borderColor: 'border-[#10B981]/20 hover:border-[#10B981]/80',
-      zIndex: 15
-    },
-    {
-      title: 'Event Photography',
-      image: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800',
-      fallbackImage: 'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800',
-      xOffset: 0,
-      yOffset: -20,
-      rotate: 2,
-      depth: 2.2,
-      borderColor: 'border-[#2EC4B6]/30 hover:border-[#2EC4B6]/90',
-      zIndex: 8
-    },
-    {
-      title: 'Commercial Photography',
-      image: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800',
-      fallbackImage: 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800',
-      xOffset: 10,
-      yOffset: 180,
-      rotate: -4,
-      depth: 0.6,
-      borderColor: 'border-[#059669]/20 hover:border-[#059669]/80',
-      zIndex: 6
-    }
-  ];
-
   // Photography Categories/Frames (Supabase-driven)
-  const galleryFrames = cmsConfig?.about?.galleryFrames && cmsConfig.about.galleryFrames.length > 0 
-    ? cmsConfig.about.galleryFrames 
-    : defaultGalleryFrames;
+  const galleryFrames = cmsConfig?.about?.galleryFrames || [];
 
   // Feature Cards
   const featureCards = (cmsConfig?.about?.features && cmsConfig.about.features.length > 0 
@@ -368,11 +297,6 @@ export default function AboutSection({
                         alt={frame.title}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                         referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          // Fallback in case local file doesn't load
-                          const img = e.currentTarget;
-                          img.src = frame.fallbackImage;
-                        }}
                       />
                       
                       {/* Dark overlay that fades out on hover */}

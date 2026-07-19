@@ -108,6 +108,34 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
     handleChange('about', 'timeline', updatedTimeline);
   };
 
+  const handleAddGalleryFrame = () => {
+    const frames = formData.about.galleryFrames || [];
+    const index = frames.length;
+    handleChange('about', 'galleryFrames', [
+      ...frames,
+      {
+        title: `Gallery image ${index + 1}`,
+        image: '',
+        xOffset: index % 2 === 0 ? -120 : 120,
+        yOffset: Math.floor(index / 2) * 120 - 100,
+        rotate: index % 2 === 0 ? -6 : 6,
+        depth: 1,
+        borderColor: 'border-[#2EC4B6]/30 hover:border-[#2EC4B6]/80',
+        zIndex: 10 + index
+      }
+    ]);
+  };
+
+  const handleUpdateGalleryFrame = (index: number, field: 'title' | 'image', value: string) => {
+    const frames = [...(formData.about.galleryFrames || [])];
+    frames[index] = { ...frames[index], [field]: value };
+    handleChange('about', 'galleryFrames', frames);
+  };
+
+  const handleRemoveGalleryFrame = (index: number) => {
+    handleChange('about', 'galleryFrames', (formData.about.galleryFrames || []).filter((_, i) => i !== index));
+  };
+
   // Prefill image URL helper
   const handlePrefillImage = (section: 'hero' | 'about', field: string, url: string) => {
     handleChange(section, field, url);
@@ -501,6 +529,47 @@ export default function SectionManagers({ config, onSave, activeSectionTab }: Se
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="font-space font-bold text-sm text-[#2EC4B6]">About Collage Media</h3>
+                <p className="text-[10px] text-[#A7C4B8] mt-1">Every image below is uploaded to Supabase and rendered in the public About collage.</p>
+              </div>
+              <button type="button" onClick={handleAddGalleryFrame} className="px-3 py-2 rounded-lg bg-[#2EC4B6] text-[#071A14] text-[10px] font-bold">
+                + Add image
+              </button>
+            </div>
+
+            {(formData.about.galleryFrames || []).length === 0 ? (
+              <p className="text-xs text-[#A7C4B8] py-6 text-center border border-dashed border-white/10 rounded-xl">No About collage images have been assigned.</p>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {(formData.about.galleryFrames || []).map((frame, index) => (
+                  <div key={`${frame.title}-${index}`} className="p-4 rounded-xl bg-black/20 border border-white/5 space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        value={frame.title}
+                        onChange={(e) => handleUpdateGalleryFrame(index, 'title', e.target.value)}
+                        placeholder="Image title"
+                        className="flex-1 px-3 py-2 rounded-lg bg-black/40 border border-white/10 text-xs text-white"
+                      />
+                      <button type="button" onClick={() => handleRemoveGalleryFrame(index)} className="p-2 text-red-400 hover:text-white" aria-label={`Remove ${frame.title}`}>
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <MediaUploader
+                      value={frame.image}
+                      onChange={(url) => handleUpdateGalleryFrame(index, 'image', url)}
+                      folder="about"
+                      label={`Collage image ${index + 1}`}
+                      aspectRatio="aspect-[3/2]"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Core metrics CRUD list */}

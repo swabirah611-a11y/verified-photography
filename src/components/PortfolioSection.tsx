@@ -23,10 +23,9 @@ import {
   CloudLightning,
   MonitorPlay
 } from 'lucide-react';
-import { PORTFOLIO_ITEMS } from '../data';
 import { PortfolioItem } from '../types';
 import OptimizedImage from './OptimizedImage';
-import { getExhibitions, getPortfolioItems, supabase } from '../lib/supabase';
+import { getExhibitions, supabase } from '../lib/supabase';
 
 interface PortfolioSectionProps {
   onBookSession: (sessionType: string) => void;
@@ -47,33 +46,21 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
       // Filter only published exhibitions
       const published = exhibitions.filter(e => e.published);
       
-      if (published.length > 0) {
-        // Map to PortfolioItem format
-        const mapped: PortfolioItem[] = published.map(e => ({
-          id: e.id,
-          title: e.title,
-          category: e.category,
-          location: 'Studio Capture',
-          image: e.cover_image,
-          description: e.description || '',
-          date: e.created_at ? new Date(e.created_at).getFullYear().toString() : '2026',
-          cameraSetup: 'Professional DSLR Setup'
-        }));
-        setActivePortfolioItems(mapped);
-      } else {
-        // Fallback to portfolio table if exhibition_art is empty
-        const fallbackItems = await getPortfolioItems();
-        setActivePortfolioItems(fallbackItems);
-      }
+      const mapped: PortfolioItem[] = published.map(e => ({
+        id: e.id,
+        title: e.title,
+        category: e.category,
+        location: e.tags?.[0] || '',
+        image: e.cover_image,
+        description: e.description || '',
+        date: e.created_at ? new Date(e.created_at).getFullYear().toString() : '',
+        cameraSetup: e.tags?.[1] || ''
+      }));
+      setActivePortfolioItems(mapped);
     } catch (err: any) {
-      console.warn('Failed to load exhibitions, attempting portfolio fallback:', err);
-      try {
-        const fallbackItems = await getPortfolioItems();
-        setActivePortfolioItems(fallbackItems);
-      } catch (fbErr: any) {
-        console.error('Portfolio fallback failed:', fbErr);
-        setError(fbErr.message || 'Error connecting to database');
-      }
+      console.error('Failed to load exhibitions:', err);
+      setActivePortfolioItems([]);
+      setError(err.message || 'Error connecting to the exhibition database');
     } finally {
       setLoading(false);
     }
@@ -174,6 +161,8 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
   };
 
   const filteredItems = getFilteredItems();
+  const featuredItem = activePortfolioItems[0];
+  const featuredDetailImage = activePortfolioItems[1]?.image || featuredItem?.image;
 
   // Mouse move parallax movement driver for desktop gallery
   const handleGalleryMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -635,6 +624,7 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
 
 
         {/* FEATURED PROJECT SHOWCASE */}
+        {featuredItem && (
         <div className="mt-24 md:mt-32 pt-20 border-t border-white/5 relative">
           
           <div className="text-center mb-16">
@@ -660,8 +650,8 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
               {/* Main Image Layer */}
               <div className="relative z-10 w-full h-[320px] sm:h-[400px] md:h-[450px] rounded-3xl overflow-hidden border border-[#2EC4B6]/30 shadow-2xl group">
                 <OptimizedImage
-                  src="/src/assets/images/nigerian_traditional_wedding_1784211187352.jpg"
-                  alt="Royal Benin Traditional Showcase"
+                  src={featuredItem.image}
+                  alt={featuredItem.title}
                 />
                 
                 {/* Micro focus elements overlays */}
@@ -674,8 +664,8 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
               {/* Overlapping smaller details panel to create real layered depth */}
               <div className="absolute -bottom-6 -right-4 w-44 h-44 rounded-2xl overflow-hidden border border-[#6EE7B7]/40 shadow-2xl z-20 hidden sm:block transform rotate-3 hover:rotate-0 transition-transform duration-500">
                 <OptimizedImage
-                  src="/src/assets/images/graduation_portrait_ekpoma_1784211201712.jpg"
-                  alt="AAU Ekpoma Portrait detail"
+                  src={featuredDetailImage}
+                  alt={`${featuredItem.title} detail`}
                 />
               </div>
 
@@ -692,24 +682,24 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
                     EXHIBITION LEADER
                   </span>
                   <span className="text-[10px] font-mono text-[#A7C4B8] flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-[#2EC4B6]" /> Dec 2025
+                    <Calendar className="w-3.5 h-3.5 text-[#2EC4B6]" /> {featuredItem.date}
                   </span>
                 </div>
 
                 <h4 className="text-2xl md:text-3xl font-space font-bold text-white mb-6">
-                  The Royal Benin Nuptials
+                  {featuredItem.title}
                 </h4>
 
                 {/* Grid properties list */}
                 <div className="grid grid-cols-2 gap-y-4 gap-x-6 mb-8 text-xs pb-6 border-b border-white/5">
                   <div>
                     <span className="text-[9px] font-mono uppercase text-[#A7C4B8] block">Focus Category:</span>
-                    <span className="font-space font-bold text-white mt-1 block">Traditional Weddings</span>
+                    <span className="font-space font-bold text-white mt-1 block">{featuredItem.category}</span>
                   </div>
                   <div>
                     <span className="text-[9px] font-mono uppercase text-[#A7C4B8] block">Exhibition Location:</span>
                     <span className="font-space font-semibold text-white mt-1 block flex items-center gap-1">
-                      <MapPin className="w-3.5 h-3.5 text-[#2EC4B6]" /> Uromi, Edo State
+                      <MapPin className="w-3.5 h-3.5 text-[#2EC4B6]" /> {featuredItem.location || 'Location not specified'}
                     </span>
                   </div>
                   <div>
@@ -719,7 +709,7 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
                   <div>
                     <span className="text-[9px] font-mono uppercase text-[#A7C4B8] block">Premium Equipment Setup:</span>
                     <span className="font-mono text-[#6EE7B7] mt-1 block font-semibold">
-                      Sony A7R V + 85mm f/1.4 GM
+                      {featuredItem.cameraSetup || 'Equipment details not specified'}
                     </span>
                   </div>
                 </div>
@@ -728,7 +718,7 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
                 <div className="mb-8">
                   <span className="text-[9px] font-mono uppercase text-[#A7C4B8] block mb-2">The Production Narrative:</span>
                   <p className="text-xs md:text-sm text-[#A7C4B8] leading-relaxed">
-                    A grand, color-accurate celebration of love and royal culture in Esan land. Our objective was to capture authentic emotions, high-energy wedding choreography, and complex textures of traditional coral beaded crowns with absolute fidelity. Utilizing multi-point high-speed strobe synchronization, we produced raw canvases formatted cleanly for lifelong museum-quality heirlooms.
+                    {featuredItem.description}
                   </p>
                 </div>
 
@@ -751,6 +741,7 @@ export default function PortfolioSection({ onBookSession }: PortfolioSectionProp
 
           </div>
         </div>
+        )}
 
 
         {/* BEHIND THE LENS STORYTELLING FLOW */}
