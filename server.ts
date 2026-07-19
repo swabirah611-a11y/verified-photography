@@ -367,10 +367,34 @@ Return ONLY valid JSON with this exact shape:
       const response = await ai.models.generateContent({
         model: "gemini-flash-latest",
         contents: { parts: [{ inlineData: { data: base64, mimeType } }, { text: prompt }] },
-        config: { responseMimeType: "application/json" }
+        config: {
+          responseMimeType: "application/json",
+          responseJsonSchema: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              heading: { type: "string" },
+              headingHighlight: { type: "string" },
+              description: { type: "string" },
+              founderRole: { type: "string" },
+              founderQuote: { type: "string" },
+              imageTitle: { type: "string" }
+            },
+            required: ["title", "heading", "headingHighlight", "description", "founderRole", "founderQuote", "imageTitle"],
+            additionalProperties: false
+          }
+        }
       });
       if (!response.text) throw new Error("Gemini returned no About analysis.");
-      return res.json({ success: true, analysis: JSON.parse(response.text.trim()) });
+      const raw = response.text.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+      let analysis: any;
+      try {
+        analysis = JSON.parse(raw);
+      } catch (parseError) {
+        console.error("[About AI invalid structured response]", { raw, parseError });
+        throw new Error("Gemini returned an invalid structured response. Please scan again.");
+      }
+      return res.json({ success: true, analysis });
     } catch (error: any) {
       console.error("[About AI analysis failed]", error);
       return res.status(500).json({ success: false, error: error?.message || String(error) });
