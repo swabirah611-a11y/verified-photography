@@ -941,6 +941,8 @@ export async function getServicesOffered(): Promise<any[]> {
       .select('*')
       .order('display_order', { ascending: true });
 
+    if (error) throw error;
+
     if (data && data.length > 0) {
       return data.map((item: any) => {
         let features: string[] = [];
@@ -977,6 +979,8 @@ export async function getPricingPackages(): Promise<any[]> {
       .select('*')
       .order('display_order', { ascending: true });
 
+    if (error) throw error;
+
     if (data && data.length > 0) {
       return data.map((item: any) => ({
         id: item.id,
@@ -986,7 +990,8 @@ export async function getPricingPackages(): Promise<any[]> {
         description: item.description || '',
         features: item.features || [],
         popular: !!item.popular,
-        category: 'Portraits & Weddings'
+        category: item.category || '',
+        visible: item.visible !== false
       }));
     }
   } catch (err) {
@@ -1403,9 +1408,10 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
         await supabase.from('nav_socials').insert([navRow]);
       }
 
-      await supabase.from('services_offered').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { error: deleteServicesError } = await supabase.from('services_offered').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (deleteServicesError) throw deleteServicesError;
       const serviceRows = (config.services || []).map((s, idx) => {
-        const priceNum = Number((s.pricingRange || '').replace(/[^0-9]/g, '')) || 50000;
+        const priceNum = Number((s.pricingRange || '').replace(/[^0-9]/g, '')) || 0;
         return {
           service_name: s.title,
           description: s.description,
@@ -1417,12 +1423,14 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
         };
       });
       if (serviceRows.length > 0) {
-        await supabase.from('services_offered').insert(serviceRows);
+        const { error: insertServicesError } = await supabase.from('services_offered').insert(serviceRows);
+        if (insertServicesError) throw insertServicesError;
       }
 
-      await supabase.from('pricing_packages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { error: deletePricingError } = await supabase.from('pricing_packages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (deletePricingError) throw deletePricingError;
       const pricingRows = (config.pricing?.packages || []).map((p, idx) => {
-        const priceNum = Number((p.price || '').replace(/[^0-9]/g, '')) || 45000;
+        const priceNum = Number((p.price || '').replace(/[^0-9]/g, '')) || 0;
         return {
           package_name: p.name,
           description: p.description,
@@ -1430,11 +1438,14 @@ export async function saveCmsConfig(config: CmsConfig): Promise<boolean> {
           price: priceNum,
           duration: p.duration,
           popular: !!p.popular,
+          category: p.category || '',
+          visible: p.visible !== false,
           display_order: idx
         };
       });
       if (pricingRows.length > 0) {
-        await supabase.from('pricing_packages').insert(pricingRows);
+        const { error: insertPricingError } = await supabase.from('pricing_packages').insert(pricingRows);
+        if (insertPricingError) throw insertPricingError;
       }
 
       await supabase.from('faq_modules').delete().neq('id', '00000000-0000-0000-0000-000000000000');

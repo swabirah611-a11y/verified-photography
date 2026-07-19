@@ -310,7 +310,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const handleSaveCmsConfig = async (updated: CmsConfig) => {
     const success = await saveCmsConfig(updated);
     if (success) {
-      setCmsConfig(updated);
+      // PostgreSQL is authoritative: invalidate the submitted snapshot and
+      // immediately refetch the records that the public frontend will render.
+      const latest = await getCmsConfig();
+      setCmsConfig(latest);
       addActivityLog('Cms Configuration block successfully updated', 'success');
       
       // Notify other live React components on the page immediately

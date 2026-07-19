@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { CmsConfig } from '../lib/supabase';
-import { PRICING_PLANS, TESTIMONIALS } from '../data';
 import { Check, Star, ArrowRight, Shield, Award, Users, GraduationCap } from 'lucide-react';
 
 interface PricingSectionProps {
@@ -12,12 +11,8 @@ interface PricingSectionProps {
 export default function PricingSection({ onSelectPlan, cmsConfig }: PricingSectionProps) {
   const [activeTestimonial, setActiveTestimonial] = useState<number>(0);
 
-  const plans = cmsConfig?.pricing?.packages && cmsConfig.pricing.packages.length > 0 
-    ? cmsConfig.pricing.packages 
-    : PRICING_PLANS;
-  const testimonials = cmsConfig?.testimonials && cmsConfig.testimonials.length > 0 
-    ? cmsConfig.testimonials 
-    : TESTIMONIALS;
+  const plans = (cmsConfig?.pricing?.packages ?? []).filter((plan) => plan.visible !== false);
+  const testimonials = cmsConfig?.testimonials ?? [];
 
   return (
     <section id="pricing" className="relative py-24 md:py-32 bg-brand-secondary/30 overflow-hidden">
@@ -114,6 +109,12 @@ export default function PricingSection({ onSelectPlan, cmsConfig }: PricingSecti
               </button>
             </motion.div>
           ))}
+          {plans.length === 0 && (
+            <div className="lg:col-span-3 rounded-2xl border border-white/5 bg-brand-bg p-10 text-center">
+              <h3 className="text-xl font-space font-bold text-brand-text">Pricing packages are being curated</h3>
+              <p className="mt-2 text-sm text-brand-muted">Contact the studio for a personalized quotation.</p>
+            </div>
+          )}
         </div>
 
         {/* BRAND TRUST & TESTIMONIALS PANEL */}
@@ -133,7 +134,7 @@ export default function PricingSection({ onSelectPlan, cmsConfig }: PricingSecti
               </p>
               
               <div className="flex items-center gap-2">
-                {[0, 1, 2].map((idx) => (
+                {testimonials.map((_, idx) => (
                   <button
                     key={idx}
                     onClick={() => setActiveTestimonial(idx)}

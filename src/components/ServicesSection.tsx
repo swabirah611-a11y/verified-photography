@@ -41,57 +41,8 @@ interface ServiceItem {
 }
 
 export default function ServicesSection({ onBookService, cmsConfig }: ServicesSectionProps) {
-  // Service list dynamically loaded from CMS or following specification exactly
-  const services: ServiceItem[] = (cmsConfig?.services && cmsConfig.services.length > 0 ? cmsConfig.services : [
-    {
-      id: 'ser-1',
-      title: 'Wedding Photography',
-      iconName: 'Heart',
-      description: 'Exquisite, full-scale documentation of your traditional and white weddings, focusing on rich emotions, traditional attire, and key family milestones in Uromi, Ekpoma, or Auchi.',
-      pricingRange: 'From ₦250,000',
-      features: ['Multi-day traditional & white coverage', 'Two professional principal shooters', 'UHD Cinematic Video highlights', 'Premium handcrafted photobook & online vault']
-    },
-    {
-      id: 'ser-2',
-      title: 'Portrait Photography',
-      iconName: 'User',
-      description: 'Individually crafted high-fashion or studio portraits for executives, creatives, and models seeking to establish a compelling and powerful digital persona.',
-      pricingRange: 'From ₦50,000',
-      features: ['Editorial retouching & color grading', 'Sophisticated modular studio flash setup', 'Multiple clothing changes allowed', 'Ultra-high res commercial license files']
-    },
-    {
-      id: 'ser-3',
-      title: 'Graduation Photography',
-      iconName: 'GraduationCap',
-      description: 'Confident and celebratory portraits honoring your hard-earned academic triumph. Customized specifically for scholars at AAU Ekpoma and neighboring campuses.',
-      pricingRange: 'From ₦40,000',
-      features: ['Pristine academic gowns & caps provided', 'Professional posture & facial coaching', 'One massive wood-framed physical print', '15 fully polished high-res digital copies']
-    },
-    {
-      id: 'ser-4',
-      title: 'Birthday Photography',
-      iconName: 'Sparkles',
-      description: 'High-energy, color-accurate reporting of your birthday festivities. Capturing genuine smiles, elegant couture, and sparkling celebratory moments.',
-      pricingRange: 'From ₦60,000',
-      features: ['Pre-event private portrait session', 'Comprehensive candid coverage', 'Same-day social media preview gallery', 'Dynamic ambient strobe setup included']
-    },
-    {
-      id: 'ser-5',
-      title: 'Event Coverage',
-      iconName: 'Calendar',
-      description: 'Sophisticated event coverage for corporate summits, traditional festivals, and high-society anniversaries, engineered to elevate your brand presence.',
-      pricingRange: 'From ₦150,000',
-      features: ['Real-time rapid media feed delivery', 'Optimized web & print resolution packages', 'Elite candid crowd interactions', 'Custom corporate branding watermarks']
-    },
-    {
-      id: 'ser-6',
-      title: 'Commercial Photography',
-      iconName: 'Briefcase',
-      description: 'Elegantly lit product layouts and industrial workflow storytelling. Designed to establish trust, capture textures, and significantly boost your sales conversions.',
-      pricingRange: 'From ₦120,000',
-      features: ['Extreme micro macro product lens details', 'Advanced custom background styling', 'High-end color fidelity calibration', 'Unlimited commercial use copyright release']
-    }
-  ]).map((ser, index) => {
+  // Supabase is the only content source. An empty table produces an empty state.
+  const services: ServiceItem[] = (cmsConfig?.services ?? []).map((ser, index) => {
     const gradients = [
       'from-[#FF6B6B] to-[#2EC4B6]',
       'from-[#34D399] to-[#2EC4B6]',
@@ -250,6 +201,18 @@ export default function ServicesSection({ onBookService, cmsConfig }: ServicesSe
   const slidePrev = () => {
     setMobileActiveIdx((prev) => (prev - 1 + services.length) % services.length);
   };
+
+  if (services.length === 0) {
+    return (
+      <section id="services" className="relative py-24 md:py-32 bg-[#071A14]">
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          <span className="text-xs font-mono tracking-widest text-[#2EC4B6] uppercase">Our Services</span>
+          <h2 className="mt-4 text-3xl font-space font-bold text-white">Services are being curated</h2>
+          <p className="mt-3 text-sm text-[#A7C4B8]">The studio will publish its current service offerings here.</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section 

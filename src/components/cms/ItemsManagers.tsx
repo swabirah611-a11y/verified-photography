@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -65,6 +65,12 @@ export default function ItemsManagers({ config, onSave, activeItemTab }: ItemsMa
   const [blogAuthor, setBlogAuthor] = useState('Alhassan Bello');
   const [blogSeoTitle, setBlogSeoTitle] = useState('');
   const [blogSeoDesc, setBlogSeoDesc] = useState('');
+
+  // The parent loads Supabase asynchronously. Keep this editor aligned with
+  // the latest database snapshot when it arrives or changes in Realtime.
+  useEffect(() => {
+    if (!isAddingNew) setFormData(config);
+  }, [config, activeItemTab, isAddingNew]);
 
   // Save changes wrapper
   const triggerSave = (updated: CmsConfig) => {
